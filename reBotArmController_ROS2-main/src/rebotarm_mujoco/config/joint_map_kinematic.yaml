@@ -1,0 +1,33 @@
+joints:
+  joint1:
+    mujoco: joint1
+    scale: 1.0
+    offset: 0.0
+  joint2:
+    mujoco: joint2
+    scale: 1.0
+    offset: 0.0
+  joint3:
+    mujoco: joint3
+    scale: 1.0
+    offset: 0.0
+  joint4:
+    mujoco: joint4
+    scale: 1.0
+    offset: 0.0
+  joint5:
+    mujoco: joint5
+    scale: 1.0
+    offset: 0.0
+  joint6:
+    mujoco: joint6
+    scale: 1.0
+    offset: 0.0
+  finger_left:
+    targets:
+      - mujoco: finger_left
+        scale: 1.0
+        offset: 0.0
+      - mujoco: finger_right
+        scale: -1.0
+        offset: 0.0
