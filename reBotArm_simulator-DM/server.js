@@ -3,7 +3,27 @@ const https = require('https');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+
 const { URL } = require('url');
+
+// Load .env file (does not override existing env vars)
+(function loadEnv() {
+  const envPath = path.join(__dirname, '.env');
+  try {
+    if (fs.existsSync(envPath)) {
+      const lines = fs.readFileSync(envPath, 'utf8').split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eq = trimmed.indexOf('=');
+        if (eq < 1) continue;
+        const key = trimmed.slice(0, eq).trim();
+        const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+        if (!(key in process.env)) process.env[key] = val;
+      }
+    }
+  } catch (_) {}
+})();
 
 const USE_HTTPS = process.env.HTTPS === '1';
 const PORT = Number(process.env.PORT || (USE_HTTPS ? 3443 : 3001));
@@ -19,8 +39,8 @@ const DEFAULT_KEY_FILE = path.join(ROOT, '.certs', 'rebotarm-local-server.key');
 const DEFAULT_CERT_FILE = path.join(ROOT, '.certs', 'rebotarm-local-server.crt');
 
 // MCP/LLM 配置（前端只负责代理到虚拟机的 text-agent HTTP 服务）
-const DEFAULT_TEXT_AGENT_URL = process.env.REBOTARM_TEXT_AGENT_URL || 'http://192.168.60.130:8082';
-const DEFAULT_MCP_URL = process.env.REBOTARM_MCP_URL || 'http://192.168.60.130:8081/mcp';
+const DEFAULT_TEXT_AGENT_URL = process.env.REBOTARM_TEXT_AGENT_URL || 'http://localhost:8082';
+const DEFAULT_MCP_URL = process.env.REBOTARM_MCP_URL || 'http://localhost:8081/mcp';
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
