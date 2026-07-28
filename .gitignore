@@ -12,6 +12,8 @@ log/
 
 # Node.js
 node_modules/
+# Environment
+.env
 
 # Certificates
 .certs/
