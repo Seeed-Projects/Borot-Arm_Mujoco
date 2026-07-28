@@ -63,12 +63,9 @@
         <div class="panel-actions">
           <button class="icon-btn" id="ros-help-top" title="功能帮助">?</button>
           <button class="icon-btn" id="sidebar-collapse" title="折叠侧边栏">◀</button>
-          <button class="icon-btn" id="pwa-install" title="安装到桌面" hidden>+</button>
           <button class="icon-btn" id="reset-camera" title="重置视角">↺</button>
         </div>
       </div>
-
-      <div class="install-status" id="pwa-install-status">正在检测安装状态</div>
 
       <div class="section ros-section">
         <div class="section-head">
@@ -76,11 +73,11 @@
             <p class="eyebrow">ROS2 桥接</p>
             <h3>真实机械臂连接</h3>
           </div>
-          <span class="mini-pill" id="ros-status">离线</span>
-        </div>
+         <span class="mini-pill" id="ros-status">离线</span>
+       </div>
         <label class="field-row">
           <span>WebSocket</span>
-          <input id="ros-url" type="text" value="ws://192.168.60.130:9090" spellcheck="false">
+          <input id="ros-url" type="text" placeholder="ws://localhost:9090" spellcheck="false">
         </label>
         <div class="button-grid">
           <button type="button" id="ros-connect">连接 ROS</button>
@@ -114,7 +111,15 @@
           <span>反馈差值</span>
           <strong id="ros-feedback-error">等待 /joint_states</strong>
         </div>
-        <p class="ros-message" id="ros-message">先在 Ubuntu 虚拟机启动 rosbridge，再连接 ws://192.168.60.130:9090。</p>
+        <p class="ros-message" id="ros-message">先在 Ubuntu 虚拟机启动 rosbridge，再输入地址连接。</p>
+      </div>
+
+      <div class="section log-section">
+        <h3>ROS 实时日志</h3>
+        <div class="button-grid">
+          <button type="button" id="ros-clear-log">清空日志</button>
+        </div>
+        <div class="ros-log" id="ros-log"></div>
       </div>
 
       <div class="section llm-section">
@@ -137,35 +142,7 @@
           <button type="button" id="llm-stop" disabled>停止</button>
         </div>
         <p class="llm-message" id="llm-message">点击启动按钮，系统将自动连接 MCP 并启用 AI 控制。</p>
-      </div>
-
-      <div class="section ros-tools-section">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">诊断</p>
-            <h3>ROS 一键检测</h3>
-          </div>
-          <span class="mini-pill" id="ros-mode-pill">仿真</span>
-        </div>
-        <label class="field-row">
-          <span>运行模式</span>
-          <select id="ros-mode">
-            <option value="fake">仿真驱动</option>
-            <option value="real">真实机械臂</option>
-          </select>
-        </label>
-        <div class="diag-grid">
-          <div class="diag-item"><span>rosbridge</span><strong id="diag-bridge">--</strong></div>
-          <div class="diag-item"><span>/joint_states</span><strong id="diag-joint-states">--</strong></div>
-          <div class="diag-item"><span>/arm_status</span><strong id="diag-arm-status">--</strong></div>
-          <div class="diag-item"><span>/gripper/state</span><strong id="diag-gripper">--</strong></div>
-          <div class="diag-item"><span>/overhead_rgb</span><strong id="diag-camera">--</strong></div>
-        </div>
-        <div class="button-grid">
-          <button type="button" id="ros-run-diagnostics">检测 ROS</button>
-          <button type="button" id="ros-clear-log">清空日志</button>
-        </div>
-      </div>
+     </div>
 
       <div class="section camera-section">
         <div class="section-head">
@@ -220,7 +197,7 @@
         </label>
         <label class="switch-row">
           <input type="checkbox" id="ros-require-confirm" checked>
-          <span>真机模式下执行前二次确认</span>
+          <span>执行前二次确认</span>
         </label>
       </div>
 
@@ -234,7 +211,6 @@
         </div>
         <div class="button-grid">
           <button type="button" id="ros-check-ik">IK 运动</button>
-          <button type="button" id="ros-send-pose">发送 Pose</button>
         </div>
       </div>
 
@@ -245,8 +221,7 @@
         <div style="line-height:1.7;font-size:13px;margin-bottom:12px;">
           <p><b>连接 ROS</b>：输入 rosbridge 的 WebSocket 地址（如 <code>ws://localhost:9090</code>），点击连接。连接后自动订阅关节状态、夹爪状态和机械臂状态。</p>
           <p><b>断开</b>：断开与 rosbridge 的连接，停止所有订阅和发布。</p>
-          <p><b>模式选择</b>：下拉框切换「仿真」和「真实机械臂」。仿真模式下命令只更新 3D 模型；真机模式下命令会驱动真实硬件。</p>
-          <p><b>控制锁</b>：勾选后允许网页向 ROS 发送控制命令。真机模式下勾选会弹出二次确认对话框，必须点「确定」才解锁。未勾选时拖滑块只动 3D 模型，不发 ROS 命令。</p>
+          <p><b>控制锁</b>：勾选后允许网页向 ROS 发送控制命令。未勾选时拖滑块只动 3D 模型，不发 ROS 命令。连接到真机控制器时命令会驱动真实硬件，请谨慎操作。</p>
         </div>
 
         <h4 style="color:#d7fff4;margin-bottom:4px;">二、机械臂控制</h4>
@@ -293,7 +268,7 @@
         <h4 style="color:#ffe0b0;margin-bottom:4px;">⚠ 安全须知</h4>
         <div style="line-height:1.7;font-size:13px;margin-bottom:12px;color:#ffe0b0;">
           <p>1. 首次使用真机时，先用 Fake Driver 验证关节方向和限位。</p>
-          <p>2. 真机模式下控制锁需二次确认，请仔细阅读弹窗内容。</p>
+          <p>2. 连接真机控制器时命令会驱动真实硬件，请谨慎操作。</p>
           <p>3. 关节滑块建议从末端关节小幅度开始，确认方向正确后再大范围运动。</p>
           <p>4. 任何异常立即点「失能」或取消控制锁。</p>
           <p>5. 重力补偿启动后手臂会主动保持姿态，先测重补再测滑块更安全。</p>
@@ -304,22 +279,6 @@
         </div>
       </dialog>
 
-      <div class="section sim-record-section">
-        <h3>仿真记录</h3>
-        <div class="button-grid">
-          <button type="button" id="ros-record-start">开始记录</button>
-          <button type="button" id="ros-record-stop">停止保存</button>
-          <button type="button" id="ros-record-replay">回放记录</button>
-          <button type="button" id="ros-record-clear">清空记录</button>
-        </div>
-        <p class="teach-status" id="ros-record-status">未记录</p>
-      </div>
-
-      <div class="section log-section">
-        <h3>ROS 实时日志</h3>
-        <div class="ros-log" id="ros-log"></div>
-      </div>
-
       <div class="section">
         <h3>姿态预设</h3>
         <div class="button-grid" id="preset-buttons"></div>
@@ -328,18 +287,6 @@
       <div class="section">
         <h3>关节角度</h3>
         <div id="joint-controls" class="joint-list"></div>
-      </div>
-
-      <div class="section">
-        <h3>夹爪</h3>
-        <div class="gripper-readout">
-          <span>开合宽度</span>
-          <strong id="gripper-width">0 毫米</strong>
-        </div>
-        <div class="button-grid">
-          <button type="button" id="open-gripper">打开夹爪</button>
-          <button type="button" id="close-gripper">关闭夹爪</button>
-        </div>
       </div>
 
       <div class="section">
@@ -355,11 +302,11 @@
       </div>
 
       <div class="section">
-        <h3>演示</h3>
-        <button class="primary-btn" id="play-path">播放取放路径</button>
+        <h3>高级控制</h3>
+        <button class="primary-btn" id="play-path">循环播放取放路径</button>
         <button class="secondary-btn" id="plan-trajectory">规划到当前姿态</button>
         <button class="secondary-btn" id="toggle-drag">启用 TCP 拖拽</button>
-        <button class="secondary-btn" id="stop-path">停止</button>
+        <button class="secondary-btn" id="stop-path">停止播放/退出拖拽</button>
       </div>
 
       <div class="section teach-section">
@@ -388,16 +335,15 @@
 
   <div class="loading-mask" id="loading-mask">
     <div class="loader"></div>
-    <p id="loading-text">正在加载 reBot 机械臂模型...</p>
+    <p id="loading-text">正在加载 Rebot_ARM-B601-DM 机械臂模型...</p>
   </div>
 
   <script src="/lib/three-r128.min.js"></script>
   <script src="/lib/STLLoader-umd.js"></script>
   <script src="/lib/URDFLoader.js"></script>
-  <script src="/js/pwa.js?v=20260612-fakecarry1"></script>
-  <script src="/js/ros/rebot-ros-client.js?v=20260612-fakecarry1"></script>
-  <script src="/js/rebot-sim.js?v=20260612-fakecarry1"></script>
-  <script src="/js/ros/rebot-ros-ui.js?v=20260612-fakecarry1"></script>
-  <script src="/js/rebot-llm.js?v=20260623"></script>
+  <script src="/js/ros/rebot-ros-client.js?v=20260728-cleanup1"></script>
+  <script src="/js/rebot-sim.js?v=20260728-cleanup1"></script>
+  <script src="/js/ros/rebot-ros-ui.js?v=20260728-cleanup1"></script>
+  <script src="/js/rebot-llm.js?v=20260728-cleanup1"></script>
 </body>
 </html>
