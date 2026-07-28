@@ -104,7 +104,7 @@ class ArmServices:
         try:
             self._hardware.stop_gravity_compensation()
             self._hardware.ensure_pos_vel_control()
-            self._hardware.endpos_ctrl.safe_home()
+            self._hardware.safe_home()
             response.success = True
             response.message = "safe_home complete"
         except Exception as exc:
