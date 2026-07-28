@@ -598,8 +598,8 @@
     window.addEventListener('pointermove', moveTcpDrag);
     window.addEventListener('pointerup', endTcpDrag);
     window.addEventListener('pointercancel', endTcpDrag);
-    document.getElementById('open-gripper').addEventListener('click', () => setGripperWidth(GRIPPER_COMMAND_MAX));
-    document.getElementById('close-gripper').addEventListener('click', () => setGripperWidth(0));
+    document.getElementById('open-gripper')?.addEventListener('click', () => setGripperWidth(GRIPPER_COMMAND_MAX));
+    document.getElementById('close-gripper')?.addEventListener('click', () => setGripperWidth(0));
 
     document.getElementById('toggle-envelope').addEventListener('change', (event) => {
       envelopeGroup.visible = event.target.checked;
