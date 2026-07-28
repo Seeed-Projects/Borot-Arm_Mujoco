@@ -2,7 +2,7 @@
   class ReBotRosClient extends EventTarget {
     constructor(options) {
       super();
-      this.url = options && options.url ? options.url : 'ws://192.168.60.130:9090';
+      this.url = options && options.url ? options.url : '';
       this.namespace = options && options.namespace ? options.namespace : 'rebotarm';
       this.socket = null;
       this.connected = false;
