@@ -232,21 +232,22 @@ ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=9090
 
 ```bash
 cd ~/Borot-Arm_Mujoco-main/reBotArm_simulator-DM
-npm start
+cp .env.example .env   # 首次使用：复制环境变量模板
+# 编辑 .env，把 localhost 改成虚拟机 IP（如 ws://192.168.x.x:9090）
+node server.js
 ```
 
 **浏览器：**
 
 1. 打开 `http://localhost:3001`
-2. 修改 rosbridge URL 为 `ws://localhost:9090`
+2. 在 WebSocket 输入框填入 rosbridge 地址（如 `ws://localhost:9090`），地址会自动记忆
 3. 点击「连接 ROS」
 4. 3D 模型应显示真机当前姿态
 
-**控制真机（三步解锁）：**
+**控制真机（两步解锁）：**
 
-1. 模式下拉框选择「真实机械臂」
-2. 勾选「允许控制」→ 弹出确认对话框 → 点击「确定」
-3. 点击「使能」按钮
+1. 勾选「允许网页向真实机械臂发控制」（连接真机控制器时会弹出二次确认）
+2. 点击「使能」按钮
 
 三步完成后，拖动关节滑块或点击夹爪按钮即可控制真机。
 
@@ -324,21 +325,63 @@ SDK 配置文件：`~/reBotArm_control_py/config/rebotarm_dm.yaml`
 
 包含电机 ID、波特率、关节限位、PID 参数等。修改后需重启控制器。
 
-### 夹爪控制参数
+#### 电机一览
 
-`rebotarmcontroller/hardware_manager.py` 顶部常量：
+| 关节 | 电机 ID | 反馈 ID | 型号 | 用途 |
+|------|---------|---------|------|------|
+| joint1 | 0x01 | 0x11 | 4340P | 底座旋转 |
+| joint2 | 0x02 | 0x12 | 4340P | 肩部俯仰 |
+| joint3 | 0x03 | 0x13 | 4340P | 肘部俯仰 |
+| joint4 | 0x04 | 0x14 | 4310  | 腕部旋转 |
+| joint5 | 0x05 | 0x15 | 4310  | 腕部俯仰 |
+| joint6 | 0x06 | 0x16 | 4310  | 腕部旋转 |
+| gripper | 0x07 | 0x17 | 4310  | 夹爪 |
 
-```python
-_G_MAX_DIST_M = 0.09       # 夹爪最大开口距离（米）
-_G_ANGLE_OPEN = -5.0      # 全开电机角度（弧度）
-_G_KP_MOVE = 2.0           # 夹爪位置增益
-_G_KD_MOVE = 2.0           # 夹爪阻尼增益
-_G_DEFAULT_FORCE = 0.30    # 闭合默认前馈力矩（Nm）
-_G_TAU_MAX = 1.5           # 夹爪最大力矩（Nm）
-_G_CTRL_RATE = 500.0       # 夹爪控制循环频率（Hz）
+#### 控制架构：手臂关节与夹爪统一走 POS_VEL
+
+所有 7 个电机（joint1–joint6 + gripper）均使用 **POS_VEL 模式**，由电机固件内部 PID 控制器闭环，上位机不做外部 PD 运算。这避免了双重 PD 叠加导致的振荡问题。
+
+**数据流：**
+
+```
+上位机 (ROS 2 / 网页)
+  │
+  ├─ 手臂 joint1-6:  SDK 控制循环 500 Hz → arm.send_pos_vel(q_target, vlim)
+  │                   → 电机固件内部 PID (pos_kp/pos_ki + vel_kp/vel_ki) 闭环
+  │
+  └─ 夹爪 gripper:    set_gripper_target() → gripper.send_pos_vel(target, vlim)
+                       → 电机固件内部 PID (pos_kp/pos_ki + vel_kp/vel_ki) 闭环
 ```
 
-如果夹爪闭合时抖动，降低 `_G_KP_MOVE` 或增大 `_G_KD_MOVE`。
+**关键设计：**
+
+- 手臂关节由 SDK 的 `RebotArmEndPose` 控制循环（`_loop_cb`）以 500 Hz 调用 `arm.send_pos_vel(q_target, vlim)`，目标位置写入 `_q_target` 数组
+- 夹爪由 `HardwareManager.set_gripper_target()` 直接调用 `send_pos_vel(target, vlim)`，无需控制循环——POS_VEL 模式下电机会自动保持目标位置
+- 夹爪反馈轮询线程以 50 Hz 调用 `request_feedback()` + `poll_feedback_once()`，仅读取状态（位置/速度/力矩），不发控制命令
+- 单关节命令（`/rebotarm/joints/jointN/cmd`）在 mode=1 时也走 `send_pos_vel`，同时同步 `_q_target[idx]` 防止控制循环覆盖
+
+#### POS_VEL PID 参数
+
+| 关节 | pos_kp | pos_ki | vel_kp | vel_ki | vlim (rad/s) |
+|------|--------|--------|--------|--------|--------------|
+| joint1–3 (4340P) | 150.0 | 0.5 | 0.0125 | 0.004 | 5.0 |
+| joint4–6 (4310)  | 50.0  | 1.0 | 0.0008 | 0.002 | 3.0 |
+| gripper (4310)   | 50.0  | 1.0 | 0.0008 | 0.002 | 3.0 |
+
+这些参数存储在电机固件寄存器中，由 SDK 在 `ensure_mode(Mode.POS_VEL)` 时写入。修改 PID 需编辑 `rebotarm_dm.yaml` 对应关节的 `POS_VEL` 段后重启控制器。
+
+#### 夹爪单位换算
+
+网页和 ROS 接口使用**米**（0.0 = 完全闭合，0.09 = 完全张开），电机固件使用**弧度**（0.0 = 闭合，−5.0 = 张开）。换算在 `HardwareManager` 中完成：
+
+```
+弧度 = (距离_m / 0.09) × (−5.0)
+距离_m = (弧度 / −5.0) × 0.09
+```
+
+> **历史问题**：早期版本夹爪使用 MIT 模式 + 500 Hz 外部 PD 环（`_gripper_safe_mit`），与电机内部 MIT PD 叠加形成双重 PD，导致闭合时持续抖动。已改为 POS_VEL 模式，与 motorbridge studio 行为一致，问题消除。
+
+
 
 ### 网页 rosbridge 地址
 
