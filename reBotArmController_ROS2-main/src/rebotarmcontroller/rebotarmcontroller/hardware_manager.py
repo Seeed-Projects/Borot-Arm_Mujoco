@@ -16,10 +16,8 @@ _G_ANGLE_OPEN = -5.0
 _G_OPEN_SOFT_LIMIT = -4.9
 _G_ARRIVE_TOL = 0.12
 _G_TAU_MAX = 1.5
-_G_KP_MOVE = 2.0
-_G_KD_MOVE = 2.0
 _G_DEFAULT_FORCE = 0.30
-_G_CTRL_RATE = 500.0
+_G_CTRL_RATE = 50.0
 _GC_VEL_THRESHOLD = 0.04
 _GC_W_VEL_THRESHOLD = 0.08
 _GC_EE_FRAME = "end_link"
@@ -234,7 +232,7 @@ class HardwareManager:
 
         self._arm.arm.enable()
         if self._gripper_mot is not None:
-            self._gripper_mot.ensure_mode(Mode.MIT, 1000)
+            self._gripper_mot.ensure_mode(Mode.POS_VEL, 1000)
         self._enabled = True
         if self.mode == "pos_vel" and not self.control_loop_active:
             self._start_pos_vel_loop()
@@ -303,6 +301,18 @@ class HardwareManager:
             self._start_pos_vel_loop()
         else:
             self.hold_current_position()
+
+    def safe_home(self) -> None:
+        """Home the arm joints and the gripper to their zero positions.
+
+        The SDK endpose controller only homes the arm joints (its gripper
+        control is disabled here via ``_has_gripper = False``), so the
+        gripper must be homed separately through this wrapper's own loop.
+        """
+        self._endpos_ctrl.safe_home()
+        if self._gripper_mot is not None:
+            self.set_gripper_position(0.0)
+        self.set_state_machine("IDLE")
 
     def send_joint_motor_cmd(self, joint_name: str, cmd) -> None:
         if joint_name not in self._arm._motor_map:
@@ -494,7 +504,7 @@ class HardwareManager:
             time.sleep(0.3)
         except CallError:
             pass
-        self._gripper_mot.ensure_mode(Mode.MIT, 1000)
+        self._gripper_mot.ensure_mode(Mode.POS_VEL, 1000)
         self._start_gripper_loop()
 
     def set_gripper_target(self, position_m: float, max_effort: float = 0.0) -> None:
@@ -507,6 +517,11 @@ class HardwareManager:
             self._gripper_target_angle = target
             self._gripper_target_effort = float(np.clip(effort, 0.05, _G_TAU_MAX))
             self._gripper_active = True
+        vlim = float(self._gripper_cfg.vlim) if self._gripper_cfg is not None else 3.0
+        try:
+            self._gripper_mot.send_pos_vel(target, vlim)
+        except Exception:
+            pass
 
     def wait_gripper_target(self, timeout: float = 3.0) -> bool:
         deadline = time.monotonic() + timeout
@@ -644,34 +659,14 @@ class HardwareManager:
         self._arm.stop_control_loop()
         self._endpos_ctrl._running = False
 
-    def _gripper_safe_mit(
-        self,
-        pos: float,
-        vel: float,
-        kp: float,
-        kd: float,
-        tau_ff: float = 0.0,
-    ) -> None:
+    def _gripper_tick(self) -> None:
         if self._gripper_mot is None or self._gripper_ctrl is None:
             return
-        pos_cmd = float(np.clip(pos, _G_OPEN_SOFT_LIMIT, 0.0))
-        pos_term = kp * (pos_cmd - self._gripper_pos) + kd * (-self._gripper_vel)
-        tau_safe = float(np.clip(pos_term + tau_ff, -_G_TAU_MAX, _G_TAU_MAX)) - pos_term
-        lock = getattr(self._gripper_ctrl, "_bus_lock", None)
         try:
-            if lock:
-                with lock:
-                    self._gripper_mot.send_mit(pos_cmd, vel, kp, kd, tau_safe)
-                    self._gripper_mot.request_feedback()
-                    self._gripper_ctrl.poll_feedback_once()
-            else:
-                self._gripper_mot.send_mit(pos_cmd, vel, kp, kd, tau_safe)
-                self._gripper_mot.request_feedback()
-                self._gripper_ctrl.poll_feedback_once()
+            self._gripper_mot.request_feedback()
+            self._gripper_ctrl.poll_feedback_once()
         except Exception:
             pass
-
-    def _gripper_tick(self) -> None:
         try:
             st = self._gripper_mot.get_state()
             if st is not None:
@@ -680,20 +675,6 @@ class HardwareManager:
                 self._gripper_torque = float(st.torq)
         except Exception:
             pass
-
-        with self._gripper_lock:
-            target = self._gripper_target_angle
-            effort = self._gripper_target_effort
-            active = self._gripper_active
-        if not active:
-            try:
-                self._gripper_mot.request_feedback()
-                self._gripper_ctrl.poll_feedback_once()
-            except Exception:
-                pass
-            return
-        tau_ff = effort if abs(target) < 1e-6 else 0.0
-        self._gripper_safe_mit(target, 0.0, _G_KP_MOVE, _G_KD_MOVE, tau_ff)
 
     def _gripper_loop(self) -> None:
         dt = 1.0 / _G_CTRL_RATE
