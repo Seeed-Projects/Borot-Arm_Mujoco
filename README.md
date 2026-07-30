@@ -29,12 +29,11 @@
 
 | 内容 | 位置 | 说明 |
 | --- | --- | --- |
-| ROS 2 包（5 个） | `reBotArmController_ROS2-main/src/` | msgs、controller、bringup、mujoco、agent |
+| ROS 2 包（7 个） | `reBotArmController_ROS2-main/src/` | msgs、controller、bringup、mujoco、agent |
 | URDF + STL 网格 | `rebotarm_bringup/description/` | 机械臂模型文件 |
 | MuJoCo 模型 | `rebotarm_mujoco/models/` | STL/运动学 XML |
 | 网页前端 | `reBotArm_simulator-DM/` | Three.js + HTML/CSS/JS |
-| 启动脚本 | `rebotarmcontroller/scripts/` | 一键启动 |
-| lerobot 安装脚本 | `rebotarmcontroller/install/` | Conda 环境一键安装 |
+| 启动脚本 | `reBotArmController_ROS2-main/scripts/` | 一键启动 |
 
 ### 外部依赖（需单独安装）
 
@@ -204,8 +203,9 @@ ros2 launch rebotarm_bringup fake_bringup.launch.py
 ### 2. 真机控制
 
 ```bash
-# 确认设备节点
+# 确认设备节点并赋予权限
 ls /dev/ttyACM0
+sudo chmod 666 /dev/ttyACM0 
 
 # 启动真机驱动
 ros2 launch rebotarm_bringup bringup.launch.py channel:=/dev/ttyACM0
@@ -385,11 +385,7 @@ SDK 配置文件：`~/reBotArm_control_py/config/rebotarm_dm.yaml`
 
 ### 网页 rosbridge 地址
 
-默认值硬编码在：
-- `reBotArm_simulator-DM/public/js/ros/rebot-ros-client.js:5`
-- `reBotArm_simulator-DM/public/js/ros/rebot-ros-ui.js:3`
-
-修改 `ws://192.168.60.130:9090` 为实际地址，或在网页连接面板中手动修改。
+rosbridge WebSocket 地址由用户在网页「ROS2 桥接」面板手动输入，默认不硬编码。`rebot-ros-ui.js` 会从 `localStorage` 读取上次保存的地址。首次连接时填入实际地址即可，例如 `ws://<Ubuntu IP>:9090`。
 
 ## 环境说明
 
@@ -429,7 +425,7 @@ sed -i 's/include-system-site-packages = false/include-system-site-packages = tr
 ### 网页控制不了真机
 
 确认三步解锁：
-1. 模式选「真实机械臂」
+1. 在「ROS2 桥接」面板连接 ROS（WebSocket 连接到真机控制器的 rosbridge）
 2. 勾选「允许控制」→ 确认对话框点「确定」
 3. 点「使能」按钮
 
@@ -439,7 +435,7 @@ sed -i 's/include-system-site-packages = false/include-system-site-packages = tr
 
 ### 夹爪闭合抖动
 
-降低 `_G_KP_MOVE`（如 2.0→1.0），增大 `_G_KD_MOVE`（如 2.0→3.0），或降低 `_G_DEFAULT_FORCE`（如 0.30→0.15）。
+降低夹爪目标力矩 `_G_DEFAULT_FORCE`（如 0.30→0.15），或增大夹爪到位容差 `_G_ARRIVE_TOL`。
 
 ### 重力补偿停止后机械臂异常
 

@@ -1,7 +1,9 @@
 (function () {
-  const NS = 'rebotarm';
-  const DEFAULT_URL = 'ws://192.168.60.130:9090';
-  const OPEN_GRIPPER_M = 0.09;
+ const NS = 'rebotarm';
+  const URL_STORAGE_KEY = 'rebotarm.ros.url';
+  function loadSavedUrl() { try { return localStorage.getItem(URL_STORAGE_KEY) || ''; } catch (_) { return ''; } }
+  function saveUrl(url) { try { localStorage.setItem(URL_STORAGE_KEY, url); } catch (_) {} }
+ const OPEN_GRIPPER_M = 0.09;
   const CLOSE_GRIPPER_M = 0;
   const GRIPPER_BASE_GAP_M = 0.014;
   const GRIPPER_VISUAL_TRAVEL_M = 0.057;
@@ -56,21 +58,11 @@
     gravityStart: document.getElementById('ros-gravity-start'),
     gravityStop: document.getElementById('ros-gravity-stop'),
     gravityQuery: document.getElementById('ros-gravity-status-query'),
-    rosOpenGripper: document.getElementById('ros-open-gripper'),
-    closeGripper: document.getElementById('ros-close-gripper'),
-    openGripper: document.getElementById('open-gripper'),
-    simCloseGripper: document.getElementById('close-gripper'),
-    mode: document.getElementById('ros-mode'),
-    modePill: document.getElementById('ros-mode-pill'),
-    runDiagnostics: document.getElementById('ros-run-diagnostics'),
-    clearLog: document.getElementById('ros-clear-log'),
-    log: document.getElementById('ros-log'),
-    diagBridge: document.getElementById('diag-bridge'),
-    diagJointStates: document.getElementById('diag-joint-states'),
-    diagArmStatus: document.getElementById('diag-arm-status'),
-    diagGripper: document.getElementById('diag-gripper'),
-    diagCamera: document.getElementById('diag-camera'),
-    cameraCanvas: document.getElementById('ros-camera-canvas'),
+   rosOpenGripper: document.getElementById('ros-open-gripper'),
+   closeGripper: document.getElementById('ros-close-gripper'),
+   clearLog: document.getElementById('ros-clear-log'),
+   log: document.getElementById('ros-log'),
+   cameraCanvas: document.getElementById('ros-camera-canvas'),
     cameraStatus: document.getElementById('ros-camera-status'),
     cameraTopic: document.getElementById('ros-camera-topic'),
     visionStatus: document.getElementById('ros-vision-status'),
@@ -88,28 +80,25 @@
     poseY: document.getElementById('ros-pose-y'),
     poseZ: document.getElementById('ros-pose-z'),
     poseDuration: document.getElementById('ros-pose-duration'),
-    checkIk: document.getElementById('ros-check-ik'),
-    sendPose: document.getElementById('ros-send-pose'),
-    recordStart: document.getElementById('ros-record-start'),
-    recordStop: document.getElementById('ros-record-stop'),
-    recordReplay: document.getElementById('ros-record-replay'),
-    recordClear: document.getElementById('ros-record-clear'),
-    recordStatus: document.getElementById('ros-record-status'),
-    stopPath: document.getElementById('stop-path')
+   checkIk: document.getElementById('ros-check-ik'),
+   stopPath: document.getElementById('stop-path')
   };
 
-  if (!window.ReBotRosClient || !els.connect) return;
+ if (!window.ReBotRosClient || !els.connect) return;
 
-  const client = new window.ReBotRosClient({ namespace: NS, url: els.url ? els.url.value : DEFAULT_URL });
-  window.reBotRos = client;
+  if (els.url && !els.url.value) {
+    const saved = loadSavedUrl();
+    if (saved) els.url.value = saved;
+  }
+  const client = new window.ReBotRosClient({ namespace: NS, url: els.url ? els.url.value : '' });
+ window.reBotRos = client;
 
   const lastSent = new Map();
   const simTargetAngles = new Map();
   const mirrorHoldUntil = new Map();
   const COMMAND_INTERVAL_MS = 45;
-  const MIRROR_HOLD_MS = 1800;
-  let realArmed = false;
-  let latestJointPositions = null;
+ const MIRROR_HOLD_MS = 1800;
+ let latestJointPositions = null;
   let latestJointStateAt = 0;
   let latestGripperPosition = null;
   let latestGripperVelocity = null;
@@ -147,9 +136,10 @@
   });
 
   els.connect.addEventListener('click', () => {
-    const nextUrl = els.url.value.trim() || DEFAULT_URL;
-    if (!canConnectWebSocketUrl(nextUrl)) return;
-    client.autoReconnect = true;
+   const nextUrl = els.url.value.trim();
+   if (!canConnectWebSocketUrl(nextUrl)) return;
+    saveUrl(nextUrl);
+   client.autoReconnect = true;
     client.connect(nextUrl);
   });
   els.disconnect.addEventListener('click', () => {
@@ -180,12 +170,9 @@
     );
   });
   els.gravityQuery.addEventListener('click', queryGravityCompensation);
-  els.rosOpenGripper.addEventListener('click', () => sendGripper(OPEN_GRIPPER_M, { requireControl: true }));
-  els.closeGripper.addEventListener('click', () => sendGripper(CLOSE_GRIPPER_M, { requireControl: true }));
-  els.openGripper.addEventListener('click', () => maybeSendGripper(OPEN_GRIPPER_M));
-  els.simCloseGripper.addEventListener('click', () => maybeSendGripper(CLOSE_GRIPPER_M));
-  els.runDiagnostics.addEventListener('click', runDiagnostics);
-  els.clearLog.addEventListener('click', () => { els.log.innerHTML = ''; });
+ els.rosOpenGripper.addEventListener('click', () => sendGripper(OPEN_GRIPPER_M, { requireControl: true }));
+ els.closeGripper.addEventListener('click', () => sendGripper(CLOSE_GRIPPER_M, { requireControl: true }));
+ els.clearLog.addEventListener('click', () => { els.log.innerHTML = ''; });
   els.checkIk.addEventListener('click', checkIk);
   document.getElementById('ros-help-top')?.addEventListener('click', () => document.getElementById('ros-help-dialog')?.showModal());
   document.getElementById('ros-help-close')?.addEventListener('click', () => document.getElementById('ros-help-dialog')?.close());
@@ -198,13 +185,8 @@
     const collapsed = sidebar.classList.contains('collapsed');
     collapseBtn.textContent = collapsed ? '▶' : '◀';
     collapseBtn.title = collapsed ? '展开侧边栏' : '折叠侧边栏';
-  });
-  els.sendPose.addEventListener('click', sendPoseGoal);
-  if (els.recordStart) els.recordStart.addEventListener('click', () => callRecordService(REQUIRED_SERVICES.recordStart, '已请求开始记录'));
-  if (els.recordStop) els.recordStop.addEventListener('click', () => callRecordService(REQUIRED_SERVICES.recordStop, '已请求停止并保存记录'));
-  if (els.recordReplay) els.recordReplay.addEventListener('click', () => callRecordService(REQUIRED_SERVICES.recordReplay, '已请求回放记录'));
-  if (els.recordClear) els.recordClear.addEventListener('click', () => callRecordService(REQUIRED_SERVICES.recordClear, '已请求清空记录'));
-  if (els.visionColor) els.visionColor.addEventListener('change', updateSelectedVisionTarget);
+ });
+ if (els.visionColor) els.visionColor.addEventListener('change', updateSelectedVisionTarget);
   if (els.visionFillPose) els.visionFillPose.addEventListener('click', fillPoseFromVisionTarget);
   if (els.visionMoveAbove) els.visionMoveAbove.addEventListener('click', moveAboveVisionTarget);
   if (els.visionPickDemo) els.visionPickDemo.addEventListener('click', runVisionPickDemo);
@@ -215,28 +197,13 @@
     });
   }
 
-  els.mode.addEventListener('change', () => {
-    cancelLowLevelPlayback();
-    realArmed = false;
-    els.control.checked = false;
-    updateModeUi();
-    writeLog(`运行模式已切换为 ${isRealMode() ? '真机' : '仿真'}`, 'warn');
-  });
-
   els.control.addEventListener('change', () => {
-    if (isRealMode() && els.control.checked) {
-      realArmed = window.confirm('真机模式会驱动真实硬件，确认解锁控制？');
-      els.control.checked = realArmed;
-    } else {
-      realArmed = false;
-    }
-    updateModeUi();
+    if (els.control.checked) writeLog('控制锁已打开', 'info');
   });
 
   waitForSimApi((sim) => sim.onCommand((command) => forwardSimCommand(command)));
 
   setStatus('closed', 'ROS 未连接');
-  updateModeUi();
   updateDiagnostics();
   window.setInterval(updateDiagnostics, 1000);
 
@@ -379,29 +346,10 @@
     writeLog(`${command.label || command.source || '批量目标'} -> ROS ${names.length} 轴`, 'ok');
   }
 
-  async function checkIk() {
-    if (!controlAllowed(true)) return;
-    const pose = readPose();
+ async function checkIk() {
+   if (!controlAllowed(true)) return;
+   const pose = readPose();
     await guardedCall(() => client.solveMoveToPoseIK(pose), '已请求 IK 运动', true);
-  }
-
-  async function sendPoseGoal() {
-    if (!controlAllowed(true)) return;
-    const pose = readPose();
-    await guardedCall(() => client.moveToPose(pose, Number(els.poseDuration.value) || 2), '已请求 MoveToPose 动作');
-  }
-
-  async function callRecordService(serviceName, optimisticMessage) {
-    const result = await guardedOptionalService(
-      serviceName,
-      () => client.callService(serviceName, 'std_srvs/srv/Trigger', {}),
-      optimisticMessage,
-      true
-    );
-    if (result && els.recordStatus) {
-      els.recordStatus.textContent = result.message || (result.success ? '完成' : '失败');
-      els.recordStatus.style.color = result.success === false ? '#ffd1c9' : '#d7fff4';
-    }
   }
 
   async function queryGravityCompensation(options) {
@@ -429,17 +377,13 @@
       listedTopics = new Set(topicList);
       listedServices = new Set(serviceList);
       writeLog(`rosapi: ${topicList.length} topics, ${serviceList.length} services`, 'ok');
-      markDiag(els.diagJointStates, topicList.includes(REQUIRED_TOPICS.jointStates), '已发现');
-      markDiag(els.diagArmStatus, topicList.includes(REQUIRED_TOPICS.armStatus), '已发现');
-      markDiag(els.diagGripper, topicList.includes(REQUIRED_TOPICS.gripper), '已发现');
-      markDiag(els.diagCamera, topicList.includes(REQUIRED_TOPICS.cameraImage), '已发现');
       if (els.visionStatus && !topicList.includes(REQUIRED_TOPICS.visionDetections)) {
         els.visionStatus.textContent = '等待节点';
       }
       if (!listedServices.has(REQUIRED_SERVICES.gravityStatus)) {
         updateGravityStatus(false, '服务不可用');
       }
-      if (!isRealMode() && !hasActionService(`/${NS}/follow_joint_trajectory`)) {
+      if (!hasActionService(`/${NS}/follow_joint_trajectory`)) {
         writeLog('已检测到仿真驱动，轨迹按钮将使用低层回放', 'info');
       }
     } catch (error) {
@@ -517,7 +461,7 @@
   }
 
   function shouldUseLowLevelTrajectory() {
-    return !isRealMode();
+    return !hasActionService(`/${NS}/follow_joint_trajectory`);
   }
 
   function hasActionService(actionName) {
@@ -564,12 +508,8 @@
       if (interactive) setMessage('控制锁未打开，网页只更新仿真，不会控制 ROS。');
       return false;
     }
-    if (isRealMode() && !realArmed) {
-      if (interactive) setMessage('真机模式仍处于锁定状态。');
-      return false;
-    }
-    if (interactive && isRealMode() && els.requireConfirm.checked) {
-      return window.confirm('确认把这条指令发送到真实机械臂？');
+    if (interactive && els.requireConfirm.checked && !shouldUseLowLevelTrajectory()) {
+      return window.confirm('确认发送这条指令？');
     }
     return true;
   }
@@ -635,11 +575,6 @@
   }
 
   function updateDiagnostics() {
-    markDiag(els.diagBridge, client.connected, client.connected ? '在线' : '离线');
-    markTopicDiag(els.diagJointStates, REQUIRED_TOPICS.jointStates);
-    markTopicDiag(els.diagArmStatus, REQUIRED_TOPICS.armStatus);
-    markTopicDiag(els.diagGripper, REQUIRED_TOPICS.gripper);
-    markTopicDiag(els.diagCamera, REQUIRED_TOPICS.cameraImage);
     updateCameraStatusFromTopic();
   }
 
@@ -1104,7 +1039,7 @@
   }
 
   async function sendVisionMoveGoal(pose, duration, optimisticMessage) {
-    if (!isRealMode()) {
+    if (!hasActionService(`/${NS}/move_to_pose`)) {
       return moveToPoseViaIkTrajectory(pose, duration, optimisticMessage);
     }
 
@@ -1515,17 +1450,6 @@
   function syncSimGripper(position) {
     if (!window.reBotSim || typeof window.reBotSim.setGripperWidth !== 'function') return;
     window.reBotSim.setGripperWidth(position, { source: 'ui', animate: true });
-  }
-
-  function isRealMode() {
-    return els.mode && els.mode.value === 'real';
-  }
-
-  function updateModeUi() {
-    if (!els.modePill) return;
-    els.modePill.textContent = isRealMode() ? (realArmed ? '真机已解锁' : '真机锁定') : '仿真';
-    els.modePill.className = 'mini-pill';
-    els.modePill.classList.add(isRealMode() ? (realArmed ? 'error' : 'warn') : 'online');
   }
 
   function getVlim() {

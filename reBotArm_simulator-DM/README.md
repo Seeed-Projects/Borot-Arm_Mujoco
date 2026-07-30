@@ -26,25 +26,24 @@ Then open:
 http://localhost:3001
 ```
 
-## Android PWA install
+## HTTPS and PWA status
 
-Desktop browsers can install from `http://localhost:3001` because `localhost`
-is treated as a secure origin. Android phones usually open the same app through
-the LAN address, for example `http://192.168.x.x:3001`; that is not a secure
-origin, so Edge/Chrome will disable Service Worker and the page cannot be
-installed as a full PWA.
+> **Note:** The current build does **not** register a Service Worker
+> (`index.html` no longer loads `pwa.js`, and no
+> `navigator.serviceWorker.register` call exists). The files
+> `manifest.webmanifest`, `service-worker.js`, and `pwa.js` are still present in
+> the repository but are orphaned and unused. As a result the panel is **not
+> installable as a full PWA** and has no offline caching. HTTPS mode itself
+> still works and is mainly useful to satisfy the secure-context requirement for
+> `wss://` rosbridge connections.
 
-For Android installation, serve the panel through HTTPS. Also keep the ROS
-connection scheme aligned with the page:
+Browsers block `ws://` WebSocket connections from HTTPS pages (mixed content).
+If you serve the panel over HTTPS, keep the ROS connection scheme aligned:
 
 ```text
 HTTPS page -> use wss:// for rosbridge, or proxy rosbridge through the same HTTPS origin
-HTTP page  -> ws:// works for LAN testing, but full PWA installation is unavailable
+HTTP page  -> ws:// works for LAN testing
 ```
-
-For quick testing on a phone, the HTTP LAN page is still usable as a normal web
-control panel. For an installable app-like PWA, put the panel behind a trusted
-HTTPS endpoint and expose rosbridge as `wss://...`.
 
 ### Local HTTPS on Windows
 
@@ -76,12 +75,11 @@ https://192.168.x.x:3443
 If Android says the connection is not secure, the phone does not trust the local
 certificate yet. Copy `.certs/rebotarm-local-root-ca.cer` to the phone and
 install it as a trusted CA certificate in Android settings, then reopen the HTTPS
-URL. Without this trust step, the page can open only after a warning and it still
-does not count as a secure PWA origin.
+URL.
 
 Treat that root certificate like a development key: install only the one you
 generated yourself, use it only on your own LAN, and remove it from the phone
-when you no longer need this local PWA.
+when you no longer need it.
 
 ## ROS2 bridge to Ubuntu VM
 

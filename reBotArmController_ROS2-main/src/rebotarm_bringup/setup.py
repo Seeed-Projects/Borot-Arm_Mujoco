@@ -14,6 +14,14 @@ setup(
         (f"share/{package_name}/config", glob("config/*.yaml")),
         (f"share/{package_name}/description/urdf", glob("description/urdf/*.urdf")),
         (f"share/{package_name}/description/meshes", glob("description/meshes/*")),
+        (
+            f"share/{package_name}/description/meshes_b601_gripper",
+            glob("description/meshes_b601_gripper/*"),
+        ),
+        (
+            f"share/{package_name}/description/meshes_rs",
+            glob("description/meshes_rs/*"),
+        ),
         (f"share/{package_name}/rviz", glob("rviz/*.rviz")),
     ],
     install_requires=["setuptools"],

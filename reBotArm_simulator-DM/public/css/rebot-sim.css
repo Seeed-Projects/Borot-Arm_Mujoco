@@ -783,6 +783,7 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .llm-chat-container {
+  overflow: hidden;
   margin-top: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 7px;
@@ -844,6 +845,7 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .llm-chat-input-row input {
+  min-width: 0;
   flex: 1;
   min-height: 38px;
   padding: 0 12px;
