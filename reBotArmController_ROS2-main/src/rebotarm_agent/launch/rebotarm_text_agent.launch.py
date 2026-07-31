@@ -35,7 +35,7 @@ def generate_launch_description():
                 "python_executable",
                 default_value=[
                     EnvironmentVariable("HOME"),
-                    "/reBotArmController_ROS2-main/.venv/bin/python3",
+                    "/Borot-Arm_Mujoco-main/reBotArmController_ROS2-main/.venv/bin/python3",
                 ],
                 description=(
                     "Python interpreter used to run the text agent. The default "
