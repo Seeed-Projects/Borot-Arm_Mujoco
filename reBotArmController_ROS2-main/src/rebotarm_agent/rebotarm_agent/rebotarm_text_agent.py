@@ -27,6 +27,27 @@ MOTION_TOOLS = {
     "record_replay",
 }
 
+TOOL_CATEGORIES = {
+    "get_robot_status": ("状态与诊断", "#5fa8ff"),
+    "diagnose_ros": ("状态与诊断", "#5fa8ff"),
+    "enable_robot": ("使能控制", "#77c96b"),
+    "disable_robot": ("使能控制", "#77c96b"),
+    "safe_home": ("运动控制", "#33d6b0"),
+    "move_to_pose": ("运动控制", "#33d6b0"),
+    "move_joints": ("运动控制", "#33d6b0"),
+    "ik_check": ("运动控制", "#33d6b0"),
+    "set_gripper_opening_mm": ("夹爪控制", "#f2a541"),
+    "gravity_compensation_status": ("重力补偿", "#a78bfa"),
+    "gravity_compensation_start": ("重力补偿", "#a78bfa"),
+    "gravity_compensation_stop": ("重力补偿", "#a78bfa"),
+    "detect_blocks": ("视觉抓取", "#ef5a4d"),
+    "pick_color": ("视觉抓取", "#ef5a4d"),
+    "record_start": ("录制回放", "#e879f9"),
+    "record_stop": ("录制回放", "#e879f9"),
+    "record_replay": ("录制回放", "#e879f9"),
+    "record_clear": ("录制回放", "#e879f9"),
+}
+
 SYSTEM_PROMPT = """你是 reBotArm 机械臂的智能控制助手。你必须使用 MCP tools 执行用户的指令，而不是解释如何执行。
 
 ## 核心规则：
@@ -672,6 +693,247 @@ def main(argv: list[str] | None = None) -> int:
         return 130
 
 
+
+# ============ MCP Dashboard ============
+
+_MCP_DASHBOARD_HTML = r"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>reBotArm MCP Dashboard</title>
+<style>
+:root{--bg:#111211;--surface:#191b1a;--surface-2:#202321;--line:rgba(255,255,255,.12);--text:#f4f1ea;--muted:#a7ada7;--teal:#33d6b0;--amber:#f2a541;--red:#ef5a4d;--green:#77c96b;--blue:#5fa8ff;--purple:#a78bfa;--pink:#e879f9}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:Inter,"Segoe UI","Microsoft YaHei",Arial,sans-serif;display:flex;flex-direction:column}
+.header{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid var(--line);background:var(--surface)}
+.header h1{margin:0;font-size:20px}
+.header .status{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--red);transition:.3s}
+.dot.online{background:var(--green)}
+.main{flex:1;display:grid;grid-template-columns:1fr 380px;gap:0;overflow:hidden}
+.left{padding:20px;overflow-y:auto}
+.right{border-left:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;overflow:hidden}
+.cat-section{margin-bottom:24px}
+.cat-title{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
+.cat-badge{width:10px;height:10px;border-radius:3px}
+.tools-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.tool-card{background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:14px;transition:.2s}
+.tool-card:hover{border-color:rgba(255,255,255,.2)}
+.tool-name{font-size:14px;font-weight:600;margin-bottom:4px}
+.tool-desc{font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.4}
+.tool-params{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.param-row{display:flex;align-items:center;gap:8px}
+.param-row label{font-size:11px;color:var(--muted);min-width:90px;font-family:monospace}
+.param-row input{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:5px 8px;color:var(--text);font-size:12px;min-width:0}
+.param-row input:focus{outline:none;border-color:var(--teal)}
+.btn-call{background:var(--teal);color:#111211;border:none;border-radius:4px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;transition:.2s}
+.btn-call:hover{opacity:.85}
+.btn-call:disabled{opacity:.4;cursor:not-allowed}
+.motion-tag{display:inline-block;font-size:10px;background:rgba(242,165,65,.15);color:var(--amber);padding:1px 6px;border-radius:3px;margin-left:6px}
+.chat-section{flex:1;display:flex;flex-direction:column;padding:16px;overflow:hidden}
+.chat-log{flex:1;overflow-y:auto;margin-bottom:12px;font-size:13px;line-height:1.5}
+.chat-log .msg{margin-bottom:8px;padding:8px 10px;border-radius:6px}
+.chat-log .msg.user{background:var(--surface-2)}
+.chat-log .msg.assistant{background:rgba(51,214,176,.08);border-left:2px solid var(--teal)}
+.chat-log .msg.tool{background:rgba(95,168,255,.08);border-left:2px solid var(--blue);font-family:monospace;font-size:11px}
+.chat-log .msg.error{background:rgba(239,90,77,.08);border-left:2px solid var(--red)}
+.chat-input-row{display:flex;gap:8px}
+.chat-input-row input{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;min-width:0}
+.chat-input-row input:focus{outline:none;border-color:var(--teal)}
+.chat-input-row button{background:var(--teal);color:#111211;border:none;border-radius:6px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.chat-input-row button:disabled{opacity:.4;cursor:not-allowed}
+.loading{display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>reBotArm MCP Dashboard</h1>
+  <div class="status"><span class="dot" id="dot"></span><span id="status-text">未连接</span></div>
+</div>
+<div class="main">
+  <div class="left" id="tools-container">
+    <div class="loading">正在加载工具列表...</div>
+  </div>
+  <div class="right">
+    <div class="chat-section">
+      <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--teal)">自然语言控制</div>
+      <div class="chat-log" id="chat-log"></div>
+      <div class="chat-input-row">
+        <input type="text" id="chat-input" placeholder="输入指令，如：回到零位、打开夹爪、抓红色方块" disabled/>
+        <button id="chat-btn" disabled>发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const MOTION_TOOLS = ["safe_home","gravity_compensation_start","set_gripper_opening_mm","move_to_pose","move_joints","pick_color","record_replay"];
+
+async function loadTools(){
+  try{
+    const r = await fetch("/tools");
+    const data = await r.json();
+    if(!data.ok){throw new Error(data.error||"加载失败")}
+    renderTools(data.tools);
+    document.getElementById("dot").classList.add("online");
+    document.getElementById("status-text").textContent = `${"connected"} ${data.tools.length} tools`;
+    document.getElementById("chat-input").disabled = false;
+    document.getElementById("chat-btn").disabled = false;
+  }catch(e){
+    document.getElementById("tools-container").innerHTML = `<div class="loading" style="color:var(--red)">加载失败: ${e.message}<br><button onclick="loadTools()" style="margin-top:8px;background:var(--teal);border:none;border-radius:4px;padding:4px 12px;cursor:pointer">重试</button></div>`;
+    document.getElementById("status-text").textContent = "连接失败";
+  }
+}
+
+function renderTools(tools){
+  const cats = {};
+  tools.forEach(t=>{
+    const info = t.category || ["其他","#a7ada7"];
+    const catName = info[0];
+    if(!cats[catName]) cats[catName] = {color:info[1], tools:[]};
+    cats[catName].tools.push(t);
+  });
+  let html = "";
+  for(const [name, info] of Object.entries(cats)){
+    html += `<div class="cat-section"><div class="cat-title"><span class="cat-badge" style="background:${info.color}"></span>${name}</div><div class="tools-grid">`;
+    for(const t of info.tools){
+      const isMotion = MOTION_TOOLS.includes(t.name);
+      html += `<div class="tool-card"><div class="tool-name">${t.name}${isMotion?'<span class="motion-tag">运动</span>':""}</div><div class="tool-desc">${t.description||""}</div>`;
+      const params = t.parameters?.properties || {};
+      const required = t.parameters?.required || [];
+      if(Object.keys(params).length > 0){
+        html += '<div class="tool-params">';
+        for(const [pname, pinfo] of Object.entries(params)){
+          const req = required.includes(pname);
+          const def = pinfo.default !== undefined ? pinfo.default : "";
+          const ptype = pinfo.type || "string";
+          html += `<div class="param-row"><label>${pname}${req?"*":""}</label><input type="${ptype==="number"?"number":"text"}" data-tool="${t.name}" data-param="${pname}" value="${def}" placeholder="${ptype}"/></div>`;
+        }
+        html += '</div>';
+      }
+      html += `<button class="btn-call" onclick="callTool('${t.name}')">调用</button></div>`;
+    }
+    html += '</div></div>';
+  }
+  document.getElementById("tools-container").innerHTML = html;
+}
+
+async function callTool(name){
+  const inputs = document.querySelectorAll(`input[data-tool="${name}"]`);
+  const args = {};
+  inputs.forEach(inp=>{
+    const val = inp.value.trim();
+    if(val === "") return;
+    const ptype = inp.placeholder;
+    if(ptype === "number" || ptype === "integer"){
+      args[inp.dataset.param] = parseFloat(val);
+    } else if(ptype === "boolean"){
+      args[inp.dataset.param] = val === "true";
+    } else {
+      args[inp.dataset.param] = val;
+    }
+  });
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = "执行中...";
+  addLog("tool", `调用 ${name}(${JSON.stringify(args)})`);
+  try{
+    const r = await fetch("/call_tool", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({name, arguments:args})});
+    const data = await r.json();
+    addLog("tool", `${name} 结果: ${JSON.stringify(data).slice(0,500)}`);
+  }catch(e){
+    addLog("error", `调用失败: ${e.message}`);
+  }
+  btn.disabled = false;
+  btn.textContent = "调用";
+}
+
+function addLog(type, text){
+  const log = document.getElementById("chat-log");
+  const div = document.createElement("div");
+  div.className = "msg " + type;
+  div.textContent = text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function sendChat(){
+  const input = document.getElementById("chat-input");
+  const btn = document.getElementById("chat-btn");
+  const text = input.value.trim();
+  if(!text) return;
+  addLog("user", text);
+  input.value = "";
+  btn.disabled = true;
+  btn.textContent = "等待...";
+  try{
+    const r = await fetch("/chat", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text})});
+    const data = await r.json();
+    if(data.ok){
+      addLog("assistant", data.text || "(无回复)");
+      if(data.events){
+        for(const ev of data.events){
+          if(ev.type === "tool"){
+            addLog("tool", `${ev.name}(${JSON.stringify(ev.arguments)}) → ${JSON.stringify(ev.result).slice(0,300)}`);
+          } else if(ev.type === "error"){
+            addLog("error", ev.message);
+          }
+        }
+      }
+    } else {
+      addLog("error", data.error || "请求失败");
+    }
+  }catch(e){
+    addLog("error", e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = "发送";
+}
+
+document.getElementById("chat-btn").addEventListener("click", sendChat);
+document.getElementById("chat-input").addEventListener("keydown", e=>{if(e.key==="Enter") sendChat()});
+loadTools();
+</script>
+</body>
+</html>"""
+
+
+async def _http_list_tools(args: argparse.Namespace) -> dict[str, Any]:
+    """List MCP tools with categories for the dashboard."""
+    try:
+        async with Client(args.mcp_url) as mcp:
+            mcp_tools = await mcp.list_tools()
+            tools = []
+            for tool in mcp_tools:
+                name = str(getattr(tool, "name", ""))
+                cat_info = TOOL_CATEGORIES.get(name, ("其他", "#a7ada7"))
+                chat_tool = _mcp_tool_to_chat_tool(tool)
+                tools.append({
+                    "name": name,
+                    "description": str(getattr(tool, "description", "") or ""),
+                    "parameters": chat_tool["function"]["parameters"],
+                    "category": cat_info,
+                    "is_motion": name in MOTION_TOOLS,
+                })
+            return {"ok": True, "tools": tools}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _http_call_tool(args: argparse.Namespace, payload: dict[str, Any]) -> dict[str, Any]:
+    """Call a single MCP tool directly."""
+    name = str(payload.get("name", "")).strip()
+    arguments = payload.get("arguments") or {}
+    if not name:
+        return {"ok": False, "error": "missing tool name"}
+    try:
+        async with Client(args.mcp_url) as mcp:
+            result = await _call_mcp_tool(mcp, name, arguments)
+            return result
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 # ============ HTTP Server mode ============
 
 # Per-request state holder for the HTTP server
@@ -822,14 +1084,26 @@ class _ChatHTTPHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):  # noqa: N802
         self._write_json(204, {})
 
+    def _write_html(self, status: int, body: bytes) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):  # noqa: N802
-        if self.path == "/health":
+        if self.path == "/" or self.path == "/dashboard":
+            self._write_html(200, _MCP_DASHBOARD_HTML.encode("utf-8"))
+        elif self.path == "/health":
             self._write_json(200, {"ok": True, "service": "rebotarm-text-agent"})
+        elif self.path == "/tools":
+            result = asyncio.run(_http_list_tools(self.server_args))
+            self._write_json(200, result)
         else:
             self._write_json(404, {"ok": False, "error": "not found"})
 
     def do_POST(self):  # noqa: N802
-        if self.path != "/chat":
+        if self.path not in ("/chat", "/call_tool"):
             self._write_json(404, {"ok": False, "error": "not found"})
             return
         try:
@@ -841,7 +1115,10 @@ class _ChatHTTPHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            result = asyncio.run(_http_handle_chat(self.server_args, payload))
+            if self.path == "/chat":
+                result = asyncio.run(_http_handle_chat(self.server_args, payload))
+            else:
+                result = asyncio.run(_http_call_tool(self.server_args, payload))
         except Exception as exc:
             self._write_json(500, {"ok": False, "error": str(exc)})
             return
@@ -855,7 +1132,7 @@ async def run_http_server(args: argparse.Namespace) -> int:
 
     _ChatHTTPHandler.server_args = args
     httpd = ThreadingHTTPServer((host, port), _ChatHTTPHandler)
-    print(f"[text-agent-http] listening on http://{host}:{port}/chat", flush=True)
+    print(f"[text-agent-http] listening on http://{host}:{port}/ (dashboard) /chat (llm) /tools (list) /call_tool (invoke)", flush=True)
     print(f"[text-agent-http] MCP={args.mcp_url} model={args.model}", flush=True)
 
     loop = asyncio.get_event_loop()
