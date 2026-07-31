@@ -676,16 +676,26 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    if not args.api_key and "localhost" not in args.base_url and "127.0.0.1" not in args.base_url:
+    has_api_key = bool(args.api_key)
+    is_local = "localhost" in args.base_url or "127.0.0.1" in args.base_url
+    # HTTP server mode: start even without API key (Dashboard/tools work, /chat returns error)
+    if getattr(args, "http_server", False):
+        if not has_api_key and not is_local:
+            print(
+                "[text-agent-http] WARNING: No API key set. /chat endpoint will return errors. "
+                "Set REBOTARM_LLM_API_KEY, DASHSCOPE_API_KEY, or OPENAI_API_KEY to enable LLM chat. "
+                "Dashboard, /tools and /call_tool work without an API key.",
+                file=sys.stderr,
+            )
+        return asyncio.run(run_http_server(args))
+    # REPL mode: API key required
+    if not has_api_key and not is_local:
         print(
             "Missing API key. Set REBOTARM_LLM_API_KEY, DASHSCOPE_API_KEY, or OPENAI_API_KEY, "
             "or point --base-url to a local OpenAI-compatible server.",
             file=sys.stderr,
         )
         return 2
-    # HTTP server mode for web UI integration
-    if getattr(args, "http_server", False):
-        return asyncio.run(run_http_server(args))
     try:
         return asyncio.run(run_repl(args))
     except KeyboardInterrupt:
@@ -942,6 +952,11 @@ _HTTP_STATE: dict[str, Any] = {}
 
 async def _http_handle_chat(args: argparse.Namespace, payload: dict[str, Any]) -> dict[str, Any]:
     """Process a single chat turn over HTTP."""
+    if not args.api_key and "localhost" not in args.base_url and "127.0.0.1" not in args.base_url:
+        return {
+            "ok": False,
+            "error": "LLM API key not configured. Set REBOTARM_LLM_API_KEY, DASHSCOPE_API_KEY, or OPENAI_API_KEY. Tool listing and direct tool calls still work.",
+        }
     user_text = str(payload.get("text") or payload.get("message") or "").strip()
     reset = bool(payload.get("reset", False))
     if not user_text:
