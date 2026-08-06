@@ -1,4 +1,4 @@
-# Borot-Arm MuJoCo
+# reBot Arm MuJoCo DM
 
 面向 reBot Arm B601-DM（达妙电机版）的 ROS 2 + MuJoCo 仿真与网页控制项目。
 
@@ -96,7 +96,7 @@ pip install -e .    # 可编辑安装，或直接用 sys.path 引用
 ### 3. 创建 Python venv 并安装依赖
 
 ```bash
-cd ~/Borot-Arm_Mujoco-main/reBotArmController_ROS2-main
+cd ~/reBot_Arm_Mujoco-DM/reBotArmController_ROS2-main
 
 # 创建 venv（必须启用系统站点包，否则 rosbridge 的 tornado/psutil 等不可见）
 python3 -m venv .venv --system-site-packages
@@ -116,7 +116,7 @@ cd /tmp
 apt download ros-jazzy-tf-transformations
 dpkg-deb -x ros-jazzy-tf-transformations*.deb tf_transformations_extract
 cp -r tf_transformations_extract/opt/ros/jazzy/lib/python3.12/site-packages/tf_transformations \
-      ~/Borot-Arm_Mujoco-main/reBotArmController_ROS2-main/.venv/lib/python3.12/site-packages/
+      ~/reBot_Arm_Mujoco-DM/reBotArmController_ROS2-main/.venv/lib/python3.12/site-packages/
 ```
 
 ### 5. 验证 venv 配置
@@ -147,7 +147,7 @@ from reBotArm_control_py.actuator import RebotArm; print('SDK OK')
 ### 6. 编译 ROS 2 工作空间
 
 ```bash
-cd ~/Borot-Arm_Mujoco-main/reBotArmController_ROS2-main
+cd ~/reBot_Arm_Mujoco-DM/reBotArmController_ROS2-main
 source /opt/ros/jazzy/setup.bash
 source .venv/bin/activate
 colcon build --symlink-install
@@ -159,10 +159,13 @@ colcon build --symlink-install
 ```text
 .
 ├─ PROJECT_ARCHITECTURE_ZH.md       整体架构、仿真原理和防抖说明
+├─ setup.sh                         可重复执行的一键安装与版本检查
+├─ rebotarm                         统一启动、停止、状态和诊断入口
+├─ requirements.txt                 Python 依赖兼容版本范围
 ├─ reBotArmController_ROS2-main/    ROS 2 工作空间
 │  ├─ scripts/                      一键启动脚本
-│  ├─ install/install_all.sh        Conda lerobot 一键安装
-│  ├─ .venv/                        Python 虚拟环境（基础模式）
+│  ├─ third_party/                  新安装时的 reBotArm_control_py SDK
+│  ├─ .venv/                        项目 Python 虚拟环境（由 setup.sh 创建）
 │  └─ src/
 │     ├─ rebotarm_msgs/             自定义 msg/srv/action
 │     ├─ rebotarmcontroller/        真机驱动、Fake Driver、硬件管理
@@ -185,10 +188,34 @@ colcon build --symlink-install
 
 ## 快速启动
 
+### 克隆后一键安装（推荐）
+
+```bash
+git clone <本仓库地址>
+cd reBot_Arm_Mujoco-DM
+./setup.sh
+./rebotarm doctor
+```
+
+安装器可重复运行：已有且满足要求的组件会跳过，不会删除现有 SDK、虚拟环境或网页 `.env`；缺失项才会安装。结束时会分别汇总已安装、已跳过、版本不匹配和失败项。只检查、不修改系统：
+
+```bash
+./setup.sh --check
+```
+
+统一启动入口：
+
+```bash
+./rebotarm start web   # rosbridge + 网页
+./rebotarm start dm    # DM 真机（单独终端）
+./rebotarm start sim   # MuJoCo 仿真；不要与 DM 真机同时启动
+./rebotarm status
+```
+
 所有命令前先 source 环境：
 
 ```bash
-cd ~/Borot-Arm_Mujoco-main/reBotArmController_ROS2-main
+cd ~/reBot_Arm_Mujoco-DM/reBotArmController_ROS2-main
 source scripts/source_rebotarm_env.sh
 ```
 
@@ -223,7 +250,7 @@ ros2 service call /rebotarm/safe_home std_srvs/srv/Trigger   # 安全回零
 **Terminal 2 — rosbridge：**
 
 ```bash
-cd ~/Borot-Arm_Mujoco-main/reBotArmController_ROS2-main
+cd ~/reBot_Arm_Mujoco-DM/reBotArmController_ROS2-main
 source scripts/source_rebotarm_env.sh
 ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=9090
 ```
@@ -231,7 +258,7 @@ ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=9090
 **Terminal 3 — Web 服务器：**
 
 ```bash
-cd ~/Borot-Arm_Mujoco-main/reBotArm_simulator-DM
+cd ~/reBot_Arm_Mujoco-DM/reBotArm_simulator-DM
 cp .env.example .env   # 首次使用：复制环境变量模板
 # 编辑 .env，把 localhost 改成虚拟机 IP（如 ws://192.168.x.x:9090）
 node server.js
@@ -458,6 +485,8 @@ sed -i 's/include-system-site-packages = false/include-system-site-packages = tr
 ## 文档
 
 - [项目架构、MuJoCo 与网页说明](./PROJECT_ARCHITECTURE_ZH.md)
+- [DM 真机数据链路与数据流向](./DATA_FLOW_ZH.md)
+- [B601-DM 用户使用手册](./USER_MANUAL_ZH.md)
 - [ROS 2 工作空间说明](./reBotArmController_ROS2-main/README_zh.md)
 - [MuJoCo 包说明](./reBotArmController_ROS2-main/src/rebotarm_mujoco/README.md)
 - [网页控制台说明](./reBotArm_simulator-DM/README.md)

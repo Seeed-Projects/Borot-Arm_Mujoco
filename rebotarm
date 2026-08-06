@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+WS_DIR="${ROOT_DIR}/reBotArmController_ROS2-main"
+WEB_DIR="${ROOT_DIR}/reBotArm_simulator-DM"
+ENV_SCRIPT="${WS_DIR}/scripts/source_rebotarm_env.sh"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/rebotarm-${UID}"
+PID_FILE="${RUNTIME_DIR}/managed.pids"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./rebotarm doctor
+  ./rebotarm status
+  ./rebotarm start dm [launch arguments...]
+  ./rebotarm start web
+  ./rebotarm start sim
+  ./rebotarm stop
+
+Modes are intentionally separate: DM hardware and Fake/MuJoCo simulation are
+never started together by this command.
+EOF
+}
+
+load_ros() {
+  [[ -f "${ENV_SCRIPT}" ]] || { echo "Missing ${ENV_SCRIPT}; run ./setup.sh first." >&2; exit 1; }
+  # shellcheck source=/dev/null
+  source "${ENV_SCRIPT}"
+}
+
+doctor() {
+  "${ROOT_DIR}/setup.sh" --check
+}
+
+status() {
+  printf '%s\n' '[managed processes]'
+  if [[ -f "${PID_FILE}" ]]; then
+    while read -r pid name; do
+      if kill -0 "${pid}" 2>/dev/null; then printf 'RUNNING pid=%s %s\n' "${pid}" "${name}"; else printf 'STOPPED pid=%s %s\n' "${pid}" "${name}"; fi
+    done <"${PID_FILE}"
+  else
+    printf 'none\n'
+  fi
+  printf '%s\n' '[ports]'
+  ss -ltnp 2>/dev/null | grep -E ':3001|:9090|:8081|:8082' || true
+  printf '%s\n' '[serial]'
+  ls -l /dev/ttyACM* 2>/dev/null || printf 'no /dev/ttyACM device\n'
+  if command -v ros2 >/dev/null 2>&1 || [[ -f /opt/ros/jazzy/setup.bash ]]; then
+    load_ros
+    printf '%s\n' '[ROS nodes]'
+    ros2 node list 2>/dev/null | sort || true
+  fi
+}
+
+run_dm() {
+  load_ros
+  exec ros2 launch rebotarm_bringup bringup.launch.py channel:="${SERIAL_CHANNEL:-/dev/ttyACM0}" "$@"
+}
+
+run_sim() {
+  load_ros
+  exec "${WS_DIR}/scripts/start_rebot_mujoco_all.sh" "$@"
+}
+
+run_web() {
+  load_ros
+  mkdir -p "${RUNTIME_DIR}"
+  : >"${PID_FILE}"
+  PIDS=()
+  stop_children() {
+    for pid in "${PIDS[@]:-}"; do kill -INT "${pid}" 2>/dev/null || true; done
+    wait "${PIDS[@]:-}" 2>/dev/null || true
+    : >"${PID_FILE}"
+  }
+  trap 'stop_children' EXIT INT TERM
+  ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:="${ROSBRIDGE_PORT:-9090}" address:="${ROSBRIDGE_ADDRESS:-0.0.0.0}" &
+  PIDS+=("$!"); printf '%s %s\n' "$!" rosbridge >>"${PID_FILE}"
+  (cd "${WEB_DIR}" && exec node server.js) &
+  PIDS+=("$!"); printf '%s %s\n' "$!" web-server >>"${PID_FILE}"
+  printf 'Web: http://localhost:3001\nROS WebSocket: ws://localhost:9090\nCtrl+C stops both.\n'
+  wait -n "${PIDS[@]}"
+}
+
+stop_managed() {
+  [[ -f "${PID_FILE}" ]] || { echo 'No managed background processes.'; return; }
+  while read -r pid name; do
+    if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then
+      echo "Stopping ${name} (pid ${pid})"
+      kill -INT "${pid}" 2>/dev/null || true
+    fi
+  done <"${PID_FILE}"
+  : >"${PID_FILE}"
+}
+
+case "${1:-}" in
+  doctor) doctor ;;
+  status) status ;;
+  stop) stop_managed ;;
+  start)
+    mode="${2:-}"
+    shift 2 || true
+    case "${mode}" in
+      dm) run_dm "$@" ;;
+      web) run_web "$@" ;;
+      sim) run_sim "$@" ;;
+      *) usage; exit 2 ;;
+    esac
+    ;;
+  -h|--help|'') usage ;;
+  *) usage; exit 2 ;;
+esac

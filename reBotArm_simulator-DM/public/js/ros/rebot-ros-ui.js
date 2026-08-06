@@ -46,6 +46,7 @@
     url: document.getElementById('ros-url'),
     connect: document.getElementById('ros-connect'),
     disconnect: document.getElementById('ros-disconnect'),
+    safeDisconnect: document.getElementById('ros-safe-disconnect'),
     mirror: document.getElementById('ros-mirror'),
     control: document.getElementById('ros-control-enable'),
     status: document.getElementById('ros-status'),
@@ -105,6 +106,7 @@
   let latestGripperAt = 0;
   let listedTopics = new Set();
   let listedServices = new Set();
+  let listedActionServers = new Set();
   let lowLevelPlayback = null;
   let lastTargetPoseSent = 0;
   let latestVisionPayload = null;
@@ -112,6 +114,9 @@
   let selectedVisionTarget = null;
   let lastVisionTarget = null;
   let visionSequenceBusy = false;
+  let safeDisconnectBusy = false;
+  let gravityCompensationActive = false;
+  let gravityStatusPollInFlight = false;
 
   client.subscribe(REQUIRED_TOPICS.jointStates, 'sensor_msgs/msg/JointState', handleJointStates, { throttleRate: 80 });
   client.subscribe(REQUIRED_TOPICS.gripper, 'rebotarm_msgs/msg/JointMotorState', handleGripperState, { throttleRate: 80 });
@@ -128,9 +133,12 @@
       writeLog(detail.message || detail.state, detail.state === 'error' ? 'error' : detail.state === 'open' ? 'ok' : 'info');
     }
     updateDiagnostics();
+    if (detail.state === 'closed' || detail.state === 'error') {
+      gravityCompensationActive = false;
+    }
     if (detail.state === 'open') {
       window.setTimeout(() => {
-        runDiagnostics().then(() => queryGravityCompensation({ auto: true }));
+        runDiagnostics();
       }, 250);
     }
   });
@@ -142,10 +150,7 @@
    client.autoReconnect = true;
     client.connect(nextUrl);
   });
-  els.disconnect.addEventListener('click', () => {
-    cancelLowLevelPlayback();
-    client.disconnect();
-  });
+  els.disconnect.addEventListener('click', disconnectRos);
   els.enable.addEventListener('click', () => guardedCall(() => client.enable(), '已请求使能'));
   els.disable.addEventListener('click', () => {
     cancelLowLevelPlayback();
@@ -206,6 +211,7 @@
   setStatus('closed', 'ROS 未连接');
   updateDiagnostics();
   window.setInterval(updateDiagnostics, 1000);
+  window.setInterval(pollGravityCompensationStatus, 500);
 
   function handleJointStates(msg) {
     if (!window.reBotSim || !Array.isArray(msg.name) || !Array.isArray(msg.position)) return;
@@ -363,6 +369,21 @@
     if (result) updateGravityStatus(Boolean(result.success), result.message || '');
   }
 
+  async function pollGravityCompensationStatus() {
+    if (
+      !client.connected ||
+      !gravityCompensationActive ||
+      gravityStatusPollInFlight
+    ) return;
+
+    gravityStatusPollInFlight = true;
+    try {
+      await queryGravityCompensation({ silent: true });
+    } finally {
+      gravityStatusPollInFlight = false;
+    }
+  }
+
   async function runDiagnostics() {
     updateDiagnostics();
     if (!client.connected) {
@@ -370,21 +391,29 @@
       return;
     }
     try {
-      const topics = await client.getRosTopics();
-      const services = await client.getRosServices();
+      const [topics, services, actions] = await Promise.all([
+        client.getRosTopics(),
+        client.getRosServices(),
+        client.getRosActionServers()
+      ]);
       const topicList = topics.topics || [];
       const serviceList = services.services || [];
+      const actionList = actions.action_servers || [];
       listedTopics = new Set(topicList);
       listedServices = new Set(serviceList);
-      writeLog(`rosapi: ${topicList.length} topics, ${serviceList.length} services`, 'ok');
+      listedActionServers = new Set(actionList);
+      writeLog(
+        `rosapi: ${topicList.length} topics, ${serviceList.length} services, ${actionList.length} actions`,
+        'ok'
+      );
       if (els.visionStatus && !topicList.includes(REQUIRED_TOPICS.visionDetections)) {
         els.visionStatus.textContent = '等待节点';
       }
       if (!listedServices.has(REQUIRED_SERVICES.gravityStatus)) {
         updateGravityStatus(false, '服务不可用');
       }
-      if (!hasActionService(`/${NS}/follow_joint_trajectory`)) {
-        writeLog('已检测到仿真驱动，轨迹按钮将使用低层回放', 'info');
+      if (!hasActionServer(`/${NS}/follow_joint_trajectory`)) {
+        writeLog('未发现轨迹动作接口，轨迹按钮将使用低层回放', 'info');
       }
     } catch (error) {
       writeLog(`rosapi 不可用，改用实时话题时间判断（${error.message || error}）`, 'warn');
@@ -412,7 +441,7 @@
       await replayTrajectoryLowLevel(points);
       return;
     }
-    if (!hasActionService(`/${NS}/follow_joint_trajectory`)) {
+    if (!hasActionServer(`/${NS}/follow_joint_trajectory`)) {
       writeLog('未发现 FollowJointTrajectory 动作，改用低层回放', 'warn');
       await replayTrajectoryLowLevel(points);
       return;
@@ -461,11 +490,11 @@
   }
 
   function shouldUseLowLevelTrajectory() {
-    return !hasActionService(`/${NS}/follow_joint_trajectory`);
+    return !hasActionServer(`/${NS}/follow_joint_trajectory`);
   }
 
-  function hasActionService(actionName) {
-    return listedServices.has(`${actionName}/_action/send_goal`);
+  function hasActionServer(actionName) {
+    return listedActionServers.has(actionName);
   }
 
   function makeTrajectoryPoint(positions, seconds) {
@@ -499,7 +528,7 @@
     };
   }
 
-  function controlAllowed(interactive) {
+  function controlAllowed(interactive, options) {
     if (!client.connected) {
       if (interactive) setStatus('closed', 'ROS 未连接');
       return false;
@@ -508,7 +537,12 @@
       if (interactive) setMessage('控制锁未打开，网页只更新仿真，不会控制 ROS。');
       return false;
     }
-    if (interactive && els.requireConfirm.checked && !shouldUseLowLevelTrajectory()) {
+    if (
+      interactive &&
+      !(options && options.skipConfirm) &&
+      els.requireConfirm.checked &&
+      !shouldUseLowLevelTrajectory()
+    ) {
       return window.confirm('确认发送这条指令？');
     }
     return true;
@@ -529,10 +563,51 @@
       const message = `ROS 已连接，但未发现服务 ${serviceName}`;
       updateGravityStatus(false, '服务不可用');
       setMessage(message);
-      if (!(options && options.auto)) writeLog(message, 'warn');
+      if (!(options && (options.auto || options.silent))) writeLog(message, 'warn');
       return null;
     }
-    return guardedCall(call, optimisticMessage, allowWithoutControl, { keepConnectionStatus: true });
+    return guardedCall(call, optimisticMessage, allowWithoutControl, {
+      keepConnectionStatus: true,
+      silent: Boolean(options && options.silent)
+    });
+  }
+
+  async function disconnectRos() {
+    if (safeDisconnectBusy) return;
+    cancelLowLevelPlayback();
+
+    if (!els.safeDisconnect || !els.safeDisconnect.checked || !client.connected) {
+      client.disconnect();
+      return;
+    }
+
+    safeDisconnectBusy = true;
+    els.disconnect.disabled = true;
+    try {
+      setMessage('断开防护：正在安全回零…');
+      writeLog('断开防护：开始安全回零', 'info');
+      const homeResult = await client.safeHome();
+      if (homeResult && homeResult.success === false) {
+        throw new Error(homeResult.message || '安全回零失败');
+      }
+      writeLog('断开防护：安全回零完成', 'ok');
+
+      setMessage('断开防护：正在失能…');
+      writeLog('断开防护：开始失能', 'info');
+      const disableResult = await client.disable();
+      if (disableResult && disableResult.success === false) {
+        throw new Error(disableResult.message || '失能失败');
+      }
+      writeLog('断开防护：失能完成，正在断开 ROS', 'ok');
+      client.disconnect();
+    } catch (error) {
+      const message = `断开防护失败，ROS 保持连接：${error && error.message ? error.message : error}`;
+      setMessage(message);
+      writeLog(message, 'error');
+    } finally {
+      safeDisconnectBusy = false;
+      els.disconnect.disabled = false;
+    }
   }
 
   async function guardedCall(call, optimisticMessage, allowWithoutControl, options) {
@@ -545,15 +620,20 @@
       return null;
     }
     try {
-      setMessage(optimisticMessage);
-      writeLog(optimisticMessage, 'info');
+      if (!(options && options.silent)) {
+        setMessage(optimisticMessage);
+        writeLog(optimisticMessage, 'info');
+      }
       const result = await call();
       const message = formatServiceResult(result);
-      setMessage(message);
-      writeLog(message, result && result.accepted === false ? 'warn' : 'ok');
+      if (!(options && options.silent)) {
+        setMessage(message);
+        writeLog(message, result && result.accepted === false ? 'warn' : 'ok');
+      }
       return result;
     } catch (error) {
       const message = error && error.message ? error.message : 'ROS 调用失败';
+      if (options && options.silent) return null;
       if (options && options.keepConnectionStatus && client.connected) {
         setMessage(message);
       } else {
@@ -1039,7 +1119,7 @@
   }
 
   async function sendVisionMoveGoal(pose, duration, optimisticMessage) {
-    if (!hasActionService(`/${NS}/move_to_pose`)) {
+    if (!hasActionServer(`/${NS}/move_to_pose`)) {
       return moveToPoseViaIkTrajectory(pose, duration, optimisticMessage);
     }
 
@@ -1298,6 +1378,7 @@
   }
 
   function updateGravityStatus(active, detail) {
+    gravityCompensationActive = Boolean(active);
     if (!els.gravityStatus) return;
     els.gravityStatus.textContent = active ? '运行中' : '未运行';
     if (detail && detail !== 'GRAVITY_COMP') {
@@ -1321,7 +1402,11 @@
 
   function sendGripper(position, options) {
     syncSimGripper(position);
-    if (options && options.requireControl && !controlAllowed(true)) return;
+    if (
+      options &&
+      options.requireControl &&
+      !controlAllowed(true, { skipConfirm: true })
+    ) return;
     if (!client.connected) {
       setStatus('closed', 'ROS 未连接');
       return;

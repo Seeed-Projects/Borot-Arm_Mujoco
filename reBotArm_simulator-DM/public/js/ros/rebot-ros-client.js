@@ -167,6 +167,10 @@
       return this.callService('/rosapi/services', 'rosapi_msgs/srv/Services', {});
     }
 
+    getRosActionServers() {
+      return this.callService('/rosapi/action_servers', 'rosapi_msgs/srv/GetActionServers', {});
+    }
+
     getLastMessageAt(topic) {
       return this._lastMessageAt.get(topic) || 0;
     }

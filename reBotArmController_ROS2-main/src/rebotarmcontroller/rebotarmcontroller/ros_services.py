@@ -115,8 +115,17 @@ class ArmServices:
 
     def start_gravity_compensation(self, _request, response):
         try:
+            already_active = self._hardware.gravity_compensation_active()
             self._hardware.start_gravity_compensation()
             target = self._hardware.gravity_compensation_target()
+            if already_active:
+                self._node.get_logger().info(
+                    "gravity compensation already active; keeping current control loop"
+                )
+                response.success = True
+                response.message = "gravity compensation already active"
+                self._node.publish_arm_status()
+                return response
             if target is not None:
                 deg = ", ".join(f"{math.degrees(float(v)):+.1f}" for v in target)
                 self._node.get_logger().info(
