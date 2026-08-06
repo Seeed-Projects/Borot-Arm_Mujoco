@@ -5,8 +5,23 @@
   const GRIPPER_COMMAND_MAX = 0.09;
   const GRIPPER_VISUAL_MAX = 0.057;
   const GRIPPER_ANIMATION_MS = 520;
-  const GRIPPER_MESH_VERSION = 'fixed-fasteners-v1';
+  const GRIPPER_MESH_VERSION = 'real-finish-v8';
   const FAKE_GRASP_LOCAL_OFFSET = new THREE.Vector3(-0.05, 0, -0.02);
+
+  // Material groups are encoded as [material index, triangle count].  The
+  // source STL files contain separate CAD solids, but STLLoader presents them
+  // as one mesh.  These ranges preserve those solids so motors, aluminium
+  // plates, accent covers and fasteners can use their real finishes.
+  const REAL_FINISH_GROUPS = {
+    base_link: [[0, 4944], [5, 3094], [0, 34486], [5, 2404], [3, 33044], [0, 432], [3, 932], [5, 2258]],
+    link1: [[3, 356], [1, 2462], [0, 3924]],
+    link2: [[0, 966], [1, 728], [2, 1940], [0, 960], [3, 14638], [0, 73780], [1, 8824]],
+    link3: [[0, 3924], [1, 6046], [0, 1482], [1, 3244], [3, 13240], [0, 32400], [3, 6572], [1, 1228], [0, 2652], [1, 1652], [0, 2640], [2, 2020]],
+    link4: [[0, 1788], [3, 1864], [1, 466], [3, 7456], [0, 32400], [3, 1864], [1, 932], [3, 466], [1, 466], [3, 466], [0, 1508], [2, 1356], [1, 4016], [0, 2136]],
+    link5: [[3, 932], [0, 32400], [3, 5688], [1, 940], [0, 2136], [1, 2658], [3, 428]],
+    link6: [[0, 1904], [3, 2926], [0, 35058]]
+  };
+  const GRIPPER_BASE_FINISH_GROUPS = [[2, 2338], [4, 2212], [2, 2184], [4, 2628], [3, 2484]];
 
   const jointDefs = [
     { name: 'joint1', label: 'J1 底座偏航', min: -2.8, max: 2.8, home: 0 },
@@ -29,6 +44,7 @@
 
   let scene;  let camera;
   let renderer;
+  let sceneResizeObserver;
   let controls;
   let robot;
   let robotFrame;
@@ -157,7 +173,8 @@
 
   function setupScene() {
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111211);
+    scene.background = new THREE.Color(0x070a08);
+    scene.fog = new THREE.Fog(0x070a08, 1.8, 5.2);
 
     camera = new THREE.PerspectiveCamera(48, getAspect(), 0.01, 20);
     resetCamera();
@@ -169,7 +186,7 @@
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.toneMappingExposure = 1.12;
     els.host.appendChild(renderer.domElement);
 
     controls = createOrbit(camera, renderer.domElement, new THREE.Vector3(0.18, 0.2, 0));
@@ -208,9 +225,9 @@
   }
 
   function setupLights() {
-    scene.add(new THREE.HemisphereLight(0xf6f1e8, 0x30352f, 0.9));
+    scene.add(new THREE.HemisphereLight(0xfff8e8, 0x141613, 1.08));
 
-    const key = new THREE.DirectionalLight(0xffffff, 1.6);
+    const key = new THREE.DirectionalLight(0xfff3dc, 1.95);
     key.position.set(1.4, 2.2, 1.2);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -222,9 +239,13 @@
     key.shadow.camera.bottom = -1.4;
     scene.add(key);
 
-    const side = new THREE.DirectionalLight(0x7fffe0, 0.35);
+    const side = new THREE.DirectionalLight(0xdde8e2, 0.38);
     side.position.set(-1, 0.6, -1.2);
     scene.add(side);
+
+    const rim = new THREE.DirectionalLight(0xd8fff0, 0.72);
+    rim.position.set(-0.8, 1.5, 1.8);
+    scene.add(rim);
   }
 
   function createWorkbench() {
@@ -238,14 +259,6 @@
     top.position.set(0.42, 0.015, 0);
     top.receiveShadow = true;
     table.add(top);
-
-    [[0.675, 0.215], [0.675, -0.215], [0.165, 0.215], [0.165, -0.215]].forEach(([x, z]) => {
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.26, 0.036), tableMat);
-      leg.position.set(x, -0.13, z);
-      leg.castShadow = true;
-      leg.receiveShadow = true;
-      table.add(leg);
-    });
 
     scene.add(table);
     scene.add(createTaskSpace());
@@ -320,16 +333,16 @@
         key: 'red',
         label: '红色方块',
         color: 0xef5a4d,
-        position: [0.34, -0.13, 0.061],
-        tableY: 0.061,
+        position: [0.34, -0.13, 0.055],
+        tableY: 0.055,
         geometry: new THREE.BoxGeometry(0.05, 0.05, 0.05)
       },
       {
         key: 'blue',
         label: '蓝色方块',
         color: 0x0ac7e8,
-        position: [0.50, 0.11, 0.055],
-        tableY: 0.055,
+        position: [0.50, 0.11, 0.048],
+        tableY: 0.048,
         geometry: new THREE.BoxGeometry(0.09, 0.036, 0.044)
       },
       {
@@ -474,23 +487,179 @@
     scene.add(envelopeGroup);
   }
 
+  function createRealFinishMaterials() {
+    return [
+      // Matte black motor housings, joint caps and outer shells.
+      new THREE.MeshStandardMaterial({
+        color: 0x0a0c0b,
+        roughness: 0.5,
+        metalness: 0.34,
+        side: THREE.DoubleSide
+      }),
+      // Matte carbon-grey anodised aluminium structure.
+      new THREE.MeshStandardMaterial({
+        color: 0x666a67,
+        roughness: 0.64,
+        metalness: 0.26,
+        side: THREE.DoubleSide
+      }),
+      // High-visibility yellow-green inserts over black cover bodies.
+      new THREE.MeshStandardMaterial({
+        color: 0xb9d51e,
+        emissive: 0x0b1000,
+        emissiveIntensity: 0.04,
+        roughness: 0.52,
+        metalness: 0.04,
+        side: THREE.DoubleSide
+      }),
+      // Black bearings, screw heads and fastener caps.
+      new THREE.MeshStandardMaterial({
+        color: 0x101211,
+        roughness: 0.4,
+        metalness: 0.5,
+        side: THREE.DoubleSide
+      }),
+      // Preserve the gripper's original dark-grey centre body.
+      new THREE.MeshStandardMaterial({
+        color: 0x3d4745,
+        roughness: 0.62,
+        metalness: 0.18,
+        side: THREE.DoubleSide
+      }),
+      // Silver trim used only on the base rings and top plates.
+      new THREE.MeshStandardMaterial({
+        color: 0xc7ccc7,
+        roughness: 0.44,
+        metalness: 0.42,
+        side: THREE.DoubleSide
+      })
+    ];
+  }
+
+  function applyRealFinishGroups(mesh, linkName, materials) {
+    const groups = REAL_FINISH_GROUPS[linkName];
+    const position = mesh.geometry && mesh.geometry.getAttribute('position');
+    if (!groups || !position) {
+      mesh.material = materials[1];
+      return;
+    }
+
+    const expectedFaces = groups.reduce((total, group) => total + group[1], 0);
+    const actualFaces = position.count / 3;
+    if (expectedFaces !== actualFaces) {
+      console.warn(`Real finish map skipped for ${linkName}: expected ${expectedFaces} faces, got ${actualFaces}`);
+      mesh.material = materials[1];
+      return;
+    }
+
+    const faceMaterials = new Uint8Array(actualFaces);
+    let faceOffset = 0;
+    groups.forEach(([materialIndex, faceCount]) => {
+      faceMaterials.fill(materialIndex, faceOffset, faceOffset + faceCount);
+      faceOffset += faceCount;
+    });
+
+    // The raised seeed studio badge is fused to link3's black cover in the
+    // source STL. Select only that raised badge on both sides of the arm.
+    if (linkName === 'link3') {
+      for (let faceIndex = 0; faceIndex < actualFaces; faceIndex += 1) {
+        const vertexOffset = faceIndex * 3;
+        const x = (
+          position.getX(vertexOffset)
+          + position.getX(vertexOffset + 1)
+          + position.getX(vertexOffset + 2)
+        ) / 3;
+        const y = (
+          position.getY(vertexOffset)
+          + position.getY(vertexOffset + 1)
+          + position.getY(vertexOffset + 2)
+        ) / 3;
+        const z = (
+          position.getZ(vertexOffset)
+          + position.getZ(vertexOffset + 1)
+          + position.getZ(vertexOffset + 2)
+        ) / 3;
+        const insideBadgePanel = (
+          (faceIndex >= 68136 && faceIndex < 70788)
+          || (faceIndex >= 72440 && faceIndex < 75080)
+        );
+        const insideBadge = (
+          insideBadgePanel
+          && x > 0.128
+          && x < 0.1885
+          && y > -0.0675
+          && y < -0.05
+        );
+        const onOuterFace = z > -0.01 || z < -0.053;
+        if (insideBadge && onOuterFace) faceMaterials[faceIndex] = 2;
+
+        const ax = position.getX(vertexOffset + 1) - position.getX(vertexOffset);
+        const ay = position.getY(vertexOffset + 1) - position.getY(vertexOffset);
+        const az = position.getZ(vertexOffset + 1) - position.getZ(vertexOffset);
+        const bx = position.getX(vertexOffset + 2) - position.getX(vertexOffset);
+        const by = position.getY(vertexOffset + 2) - position.getY(vertexOffset);
+        const bz = position.getZ(vertexOffset + 2) - position.getZ(vertexOffset);
+        const crossX = ay * bz - az * by;
+        const crossY = az * bx - ax * bz;
+        const crossZ = ax * by - ay * bx;
+        const faceArea = Math.sqrt(crossX * crossX + crossY * crossY + crossZ * crossZ) / 2;
+        const insideText = (
+          x > 0.128
+          && x < 0.1885
+          && y > -0.067
+          && y < -0.051
+          && faceArea < 0.00001
+        );
+        const frontTextFace = faceIndex >= 68136 && faceIndex < 70788 && Math.abs(z + 0.004025) < 0.0001;
+        const backTextFace = faceIndex >= 72440 && faceIndex < 75080 && Math.abs(z + 0.05923) < 0.0001;
+        if (insideText && (frontTextFace || backTextFace)) faceMaterials[faceIndex] = 0;
+      }
+    }
+
+    mesh.geometry.clearGroups();
+    let groupStart = 0;
+    for (let faceIndex = 1; faceIndex <= actualFaces; faceIndex += 1) {
+      if (faceIndex < actualFaces && faceMaterials[faceIndex] === faceMaterials[groupStart]) continue;
+      mesh.geometry.addGroup(
+        groupStart * 3,
+        (faceIndex - groupStart) * 3,
+        faceMaterials[groupStart]
+      );
+      groupStart = faceIndex;
+    }
+    mesh.material = materials;
+  }
+
   function styleRobot(root, ghost) {
-    const palette = [0xd8d5cc, 0xbec9c0, 0xe7e1d6, 0xaeb9b1, 0xd0c6b8, 0x9fb0a9, 0xf2a541, 0x33d6b0];
-    let index = 0;
+    const realMaterials = ghost ? null : createRealFinishMaterials();
     root.traverse((child) => {
       if (!child.isMesh) return;
       child.castShadow = !ghost;
       child.receiveShadow = !ghost;
-      child.material = new THREE.MeshStandardMaterial({
-        color: ghost ? 0x33d6b0 : palette[index % palette.length],
-        roughness: ghost ? 0.28 : 0.62,
-        metalness: ghost ? 0.05 : 0.18,
-        transparent: ghost,
-        opacity: ghost ? 0.22 : 1,
-        side: THREE.DoubleSide
-      });
-      index += 1;
+
+      if (ghost) {
+        child.material = new THREE.MeshStandardMaterial({
+          color: 0x33d6b0,
+          roughness: 0.28,
+          metalness: 0.05,
+          transparent: true,
+          opacity: 0.22,
+          side: THREE.DoubleSide
+        });
+        return;
+      }
+
+      const linkName = getUrdfLinkName(child);
+      applyRealFinishGroups(child, linkName, realMaterials);
     });
+  }
+  function getUrdfLinkName(object) {
+    let node = object;
+    while (node) {
+      if (node.isURDFLink && node.urdfName) return node.urdfName;
+      node = node.parent;
+    }
+    return '';
   }
 
   function createGhostRobot() {
@@ -514,9 +683,9 @@
 
     const loader = new THREE.STLLoader();
     const parts = [
-      { name: 'gripper_base', file: 'gripper_base.stl', color: ghost ? 0x33d6b0 : 0xcfd8d1, moving: false },
-      { name: 'left_finger', file: 'left_finger.stl', color: ghost ? 0x33d6b0 : 0x2fd0b0, moving: true },
-      { name: 'right_finger', file: 'right_finger.stl', color: ghost ? 0x33d6b0 : 0x2fd0b0, moving: true }
+      { name: 'gripper_base', file: 'gripper_base.stl', finish: 'accent', moving: false },
+      { name: 'left_finger', file: 'left_finger.stl', finish: 'finger', moving: true },
+      { name: 'right_finger', file: 'right_finger.stl', finish: 'finger', moving: true }
     ];
 
     const meshes = await Promise.all(parts.map((part) => loadGripperMesh(loader, part, ghost)));
@@ -537,14 +706,31 @@
     return new Promise((resolve, reject) => {
       loader.load(`/api/gripper_meshes/${part.file}?v=${GRIPPER_MESH_VERSION}`, (geometry) => {
         geometry.computeVertexNormals();
-        const material = new THREE.MeshStandardMaterial({
-          color: part.color,
-          roughness: part.moving ? 0.42 : 0.62,
-          metalness: part.moving ? 0.18 : 0.25,
+        const finishes = {
+          accent: { color: 0xb9d51e, emissive: 0x0b1000, emissiveIntensity: 0.04, roughness: 0.52, metalness: 0.04 },
+          finger: { color: 0x171b1a, roughness: 0.46, metalness: 0.34 }
+        };
+        const finish = finishes[part.finish] || finishes.finger;
+        let material = new THREE.MeshStandardMaterial({
+          ...finish,
+          color: ghost ? 0x33d6b0 : finish.color,
+          emissive: ghost ? 0x000000 : (finish.emissive || 0x000000),
+          emissiveIntensity: ghost ? 0 : (finish.emissiveIntensity || 0),
           transparent: ghost,
           opacity: ghost ? 0.22 : 1,
           side: THREE.DoubleSide
         });
+
+        if (!ghost && part.name === 'gripper_base') {
+          geometry.clearGroups();
+          let faceOffset = 0;
+          GRIPPER_BASE_FINISH_GROUPS.forEach(([materialIndex, faceCount]) => {
+            geometry.addGroup(faceOffset * 3, faceCount * 3, materialIndex);
+            faceOffset += faceCount;
+          });
+          material = createRealFinishMaterials();
+        }
+
         const mesh = new THREE.Mesh(geometry, material);
         mesh.name = part.name;
         mesh.castShadow = !ghost;
@@ -579,6 +765,10 @@
 
   function setupEvents() {
     window.addEventListener('resize', resize);
+    if (window.ResizeObserver) {
+      sceneResizeObserver = new ResizeObserver(() => resize());
+      sceneResizeObserver.observe(els.host);
+    }
     document.getElementById('reset-camera').addEventListener('click', resetCamera);
     document.getElementById('play-path').addEventListener('click', playPath);
     document.getElementById('stop-path').addEventListener('click', () => {
