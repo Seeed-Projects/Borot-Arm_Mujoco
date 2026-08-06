@@ -49,17 +49,13 @@
       <geom name="task_table_top" type="box" size="0.30 0.26 0.015" material="table_mat" contype="1" conaffinity="1" condim="6" friction="2.2 0.12 0.02" solref="0.003 1" solimp="0.98 0.995 0.0005"/>
       <geom name="task_pick_zone" type="box" pos="0 -0.13 0.017" size="0.285 0.12 0.002" material="pick_zone_mat" contype="0" conaffinity="0"/>
       <geom name="task_place_zone" type="box" pos="0 0.13 0.017" size="0.285 0.12 0.002" material="place_zone_mat" contype="0" conaffinity="0"/>
-      <geom name="task_leg_fl" type="box" pos="0.255 0.215 -0.13" size="0.018 0.018 0.13" material="table_mat" contype="0" conaffinity="0"/>
-      <geom name="task_leg_fr" type="box" pos="0.255 -0.215 -0.13" size="0.018 0.018 0.13" material="table_mat" contype="0" conaffinity="0"/>
-      <geom name="task_leg_bl" type="box" pos="-0.255 0.215 -0.13" size="0.018 0.018 0.13" material="table_mat" contype="0" conaffinity="0"/>
-      <geom name="task_leg_br" type="box" pos="-0.255 -0.215 -0.13" size="0.018 0.018 0.13" material="table_mat" contype="0" conaffinity="0"/>
     </body>
 
-    <body name="red_cube" pos="0.34 -0.13 0.061">
+    <body name="red_cube" pos="0.34 -0.13 0.055">
       <freejoint/>
       <geom type="box" size="0.025 0.025 0.025" material="object_red_mat" contype="1" conaffinity="1" condim="6" mass="0.04" friction="6.0 0.25 0.04" solref="0.003 1" solimp="0.98 0.995 0.0005"/>
     </body>
-    <body name="blue_block" pos="0.50 0.11 0.055">
+    <body name="blue_block" pos="0.50 0.11 0.048">
       <freejoint/>
       <geom type="box" size="0.045 0.022 0.018" material="object_blue_mat" contype="1" conaffinity="1" condim="6" mass="0.05" friction="6.0 0.25 0.04" solref="0.003 1" solimp="0.98 0.995 0.0005"/>
     </body>
