@@ -353,6 +353,8 @@ class HardwareManager:
         self.set_state_machine("LOWLEVEL_STREAMING")
 
     def start_gravity_compensation(self) -> None:
+        if self._gravity_comp_active:
+            return
         self.stop_gravity_compensation()
         if not self._enabled:
             self._arm.arm.enable()
@@ -362,9 +364,10 @@ class HardwareManager:
         self._endpos_ctrl._moving = False
         self._gravity_comp_q_target = self._arm.arm.get_positions(request_feedback=True).copy()
         self._gravity_comp_q_last = self._gravity_comp_q_target.copy()
-        self._arm.arm.mode_mit(
-            kp=np.full(self._arm.arm.num_joints, _GC_KP, dtype=np.float64),
-            kd=np.full(self._arm.arm.num_joints, _GC_KD, dtype=np.float64),
+        initial_tau_g = self._gravity_torque(self._gravity_comp_q_target)
+        self._enter_gravity_compensation_mode(
+            self._gravity_comp_q_target,
+            initial_tau_g,
         )
         self._gravity_comp_integral = np.zeros_like(self._gravity_comp_q_target)
         self._gravity_comp_lock_counter = 0
@@ -419,6 +422,48 @@ class HardwareManager:
         self._gravity_comp_q_last = np.array(q, dtype=np.float64, copy=True)
         return self._gravity_comp_q_last.copy()
 
+    def _gravity_torque(self, q: np.ndarray) -> np.ndarray:
+        from reBotArm_control_py.kinematics import pad_q_for_model
+
+        q_padded = pad_q_for_model(self._gc_model, q, len(q))
+        tau_g = self._gc_compute_generalized_gravity(
+            self._gc_model,
+            q_padded,
+            self._gc_data,
+        )
+        return np.asarray(tau_g[: len(q)], dtype=np.float64)
+
+    def _enter_gravity_compensation_mode(
+        self,
+        q_hold: np.ndarray,
+        tau_g: np.ndarray,
+    ) -> None:
+        """Enter MIT one joint at a time while holding the measured pose.
+
+        ``JointGroup.mode_mit`` switches every motor before the first MIT
+        command is sent. During that gap a newly switched motor can briefly
+        use its default zero target. Send a hold command immediately after
+        switching each motor so the arm never sees that uncommanded window.
+        """
+        from motorbridge import Mode
+
+        group = self._arm.arm
+        kp = np.full(group.num_joints, _GC_KP, dtype=np.float64)
+        kd = np.full(group.num_joints, _GC_KD, dtype=np.float64)
+        for index, joint_name in enumerate(group.joint_names):
+            motor = self._arm._motor_map[joint_name]
+            motor.ensure_mode(Mode.MIT, 1000)
+            motor.send_mit(
+                float(q_hold[index]),
+                0.0,
+                float(kp[index]),
+                float(kd[index]),
+                float(tau_g[index]),
+            )
+        group._mode = "mit"
+        group._mit_kp = kp
+        group._mit_kd = kd
+
     def _gravity_comp_tick(self, arm, dt: float) -> None:
         del dt
         if not self._gravity_comp_active or self._gravity_comp_q_target is None:
@@ -426,10 +471,7 @@ class HardwareManager:
 
         q = self._read_gravity_comp_positions()
         qd = arm.arm.get_velocities()
-        from reBotArm_control_py.kinematics import pad_q_for_model
-        q_padded = pad_q_for_model(self._gc_model, q, len(q))
-        tau_g = self._gc_compute_generalized_gravity(self._gc_model, q_padded, self._gc_data)
-        tau_g = tau_g[:len(q)]
+        tau_g = self._gravity_torque(q)
 
         q_error = self._gravity_comp_q_target - q
         if self._gravity_comp_integral is None:

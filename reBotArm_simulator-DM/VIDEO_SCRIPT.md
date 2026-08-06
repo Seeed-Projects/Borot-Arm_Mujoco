@@ -57,7 +57,7 @@
 **终端操作（录制）**：
 
 ```bash
-cd ~/Borot-Arm_Mujoco-main/reBotArm_simulator-DM
+cd ~/reBot_Arm_Mujoco-DM/reBotArm_simulator-DM
 npm start
 ```
 
@@ -105,7 +105,7 @@ npm start
 **终端操作（录制）**：
 
 ```bash
-cd ~/Borot-Arm_Mujoco-main/reBotArmController_ROS2-main
+cd ~/reBot_Arm_Mujoco-DM/reBotArmController_ROS2-main
 source scripts/source_rebotarm_env.sh
 
 # 终端 1：Fake Driver
@@ -226,7 +226,7 @@ ros2 launch rebotarm_agent rebotarm_mcp.launch.py motion_mode:=allow
 **终端操作（录制）**：
 
 ```bash
-cd ~/Borot-Arm_Mujoco-main/reBotArmController_ROS2-main
+cd ~/reBot_Arm_Mujoco-DM/reBotArmController_ROS2-main
 ./scripts/start_rebot_mujoco_all.sh
 ```
 
@@ -267,7 +267,7 @@ cd ~/Borot-Arm_Mujoco-main/reBotArmController_ROS2-main
 **字幕**：
 - 三步解锁：连接 → 控制锁 → 使能
 - 先 Fake Driver 验证，再切真机
-- GitHub: Yang-Ci/Borot-Arm_Mujoco
+- GitHub: Yang-Ci/reBot_Arm_Mujoco-DM
 
 **画面**：机械臂回零 → 淡出
 
