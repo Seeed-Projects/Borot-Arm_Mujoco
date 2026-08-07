@@ -508,6 +508,13 @@ input[type="range"]::-webkit-slider-thumb {
   font-size: 12px;
 }
 
+#ros-gravity-status {
+  max-width: 72%;
+  text-align: right;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .ros-feedback strong {
   color: var(--text);
   text-align: right;
@@ -531,12 +538,10 @@ input[type="range"]::-webkit-slider-thumb {
   white-space: nowrap;
 }
 
-.camera-section .button-grid button:nth-child(3) {
-  grid-column: 1 / -1;
-}
-
 .ros-message {
-  min-height: 34px;
+  height: 54px;
+  min-height: 54px;
+  max-height: 54px;
   margin: 10px 0 0;
   padding: 9px 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -545,6 +550,11 @@ input[type="range"]::-webkit-slider-thumb {
   background: rgba(255, 255, 255, 0.04);
   font-size: 12px;
   line-height: 1.4;
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .diag-grid {

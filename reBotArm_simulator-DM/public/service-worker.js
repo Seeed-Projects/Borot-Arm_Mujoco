@@ -1,14 +1,14 @@
-const CACHE_NAME = 'rebot-arm-pwa-v41-fakecarry1';
+const CACHE_NAME = 'rebot-arm-pwa-v65-metalpalmplate1';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
   '/favicon.png',
-  '/css/rebot-sim.css',
+  '/css/rebot-sim.css?v=20260806-randomplace1',
   '/js/pwa.js?v=20260612-fakecarry1',
-  '/js/rebot-sim.js?v=20260612-fakecarry1',
-  '/js/ros/rebot-ros-client.js?v=20260612-fakecarry1',
-  '/js/ros/rebot-ros-ui.js?v=20260612-fakecarry1',
+  '/js/rebot-sim.js?v=20260807-metalpalmplate1',
+  '/js/ros/rebot-ros-client.js?v=20260806-objectfeedback1',
+  '/js/ros/rebot-ros-ui.js?v=20260807-objectassociation1',
   '/lib/three-r128.min.js',
   '/lib/STLLoader-umd.js',
   '/lib/URDFLoader.js'

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections import deque
+from contextlib import redirect_stderr
 from dataclasses import dataclass
+import io
 import json
 import math
 import time
@@ -16,7 +18,12 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
 try:
-    import cv2  # type: ignore
+    # Some ROS desktop images provide a system OpenCV built against NumPy 1.x,
+    # while this project's venv uses NumPy 2.x.  NumPy prints a full traceback
+    # to stderr before the optional import raises; keep startup output clean and
+    # fall back to the built-in NumPy connected-components implementation.
+    with redirect_stderr(io.StringIO()):
+        import cv2  # type: ignore
 except Exception:  # pragma: no cover - optional runtime dependency
     cv2 = None
 
@@ -25,6 +32,12 @@ _BOX_COLORS = {
     "red": (255, 40, 30),
     "blue": (0, 220, 255),
     "yellow": (255, 230, 40),
+}
+
+_OBJECT_COLOR_BY_NAME = {
+    "red_cube": "red",
+    "blue_block": "blue",
+    "yellow_cylinder": "yellow",
 }
 
 
@@ -75,6 +88,9 @@ class MujocoSimColorDetector(Node):
         self.declare_parameter("detections_topic", "")
         self.declare_parameter("target_pose_topic", "")
         self.declare_parameter("poses_topic", "")
+        self.declare_parameter("object_states_topic", "")
+        self.declare_parameter("object_association_max_distance_m", 0.055)
+        self.declare_parameter("object_states_max_age_s", 0.5)
         self.declare_parameter("target_color", "red")
         self.declare_parameter("process_hz", 8.0)
         self.declare_parameter("min_area_px", 35)
@@ -121,6 +137,18 @@ class MujocoSimColorDetector(Node):
             self.get_parameter("poses_topic").value
             or f"/{namespace}/vision/color_blocks/poses"
         )
+        self.object_states_topic = str(
+            self.get_parameter("object_states_topic").value
+            or f"/{namespace}/mujoco/object_states"
+        )
+        self.object_association_max_distance_m = max(
+            float(self.get_parameter("object_association_max_distance_m").value),
+            0.0,
+        )
+        self.object_states_max_age_s = max(
+            float(self.get_parameter("object_states_max_age_s").value),
+            0.0,
+        )
         self.target_color = str(self.get_parameter("target_color").value or "red").lower()
         self.process_hz = max(float(self.get_parameter("process_hz").value), 0.5)
         self.min_area_px = max(int(self.get_parameter("min_area_px").value), 1)
@@ -156,19 +184,57 @@ class MujocoSimColorDetector(Node):
         self.fovy_deg = float(self.get_parameter("fovy_deg").value)
         self.target_z = float(self.get_parameter("target_z").value)
         self._last_process = 0.0
+        self._object_states_at = 0.0
+        self._object_xy_by_color: dict[str, tuple[float, float]] = {}
 
         self.annotated_pub = self.create_publisher(Image, self.annotated_topic, qos_profile_sensor_data)
         self.detections_pub = self.create_publisher(String, self.detections_topic, 10)
         self.target_pose_pub = self.create_publisher(PoseStamped, self.target_pose_topic, 10)
         self.poses_pub = self.create_publisher(PoseArray, self.poses_topic, 10)
         self.create_subscription(Image, self.image_topic, self._image_callback, qos_profile_sensor_data)
+        self.create_subscription(
+            String,
+            self.object_states_topic,
+            self._object_states_callback,
+            qos_profile_sensor_data,
+        )
 
         self.get_logger().info(
             "MuJoCo color detector ready: "
             f"image={self.image_topic}, detections={self.detections_topic}, "
             f"target_pose={self.target_pose_topic}, target_color={self.target_color}, "
+            f"object_states={self.object_states_topic}, "
             f"opencv={'yes' if cv2 is not None else 'no'}"
         )
+
+    def _object_states_callback(self, msg: String) -> None:
+        try:
+            payload = json.loads(msg.data or "{}")
+        except Exception:
+            return
+        objects = payload.get("objects")
+        if not isinstance(objects, list):
+            return
+
+        next_positions: dict[str, tuple[float, float]] = {}
+        for item in objects:
+            if not isinstance(item, dict):
+                continue
+            color = _OBJECT_COLOR_BY_NAME.get(str(item.get("name", "")))
+            position = item.get("position")
+            if color is None or not isinstance(position, list) or len(position) < 2:
+                continue
+            try:
+                x = float(position[0])
+                y = float(position[1])
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(x) and math.isfinite(y):
+                next_positions[color] = (x, y)
+
+        if next_positions:
+            self._object_xy_by_color = next_positions
+            self._object_states_at = time.monotonic()
 
     def _image_callback(self, msg: Image) -> None:
         now = time.monotonic()
@@ -255,8 +321,35 @@ class MujocoSimColorDetector(Node):
                         grasp_yaw_rad=grasp_yaw,
                     )
                 )
+        detections = self._associate_with_mujoco_objects(detections)
         detections.sort(key=lambda item: (-item.area, item.color))
         return detections
+
+    def _associate_with_mujoco_objects(self, detections: list[Detection]) -> list[Detection]:
+        if (
+            not self._object_xy_by_color
+            or time.monotonic() - self._object_states_at > self.object_states_max_age_s
+        ):
+            return detections
+
+        associated: list[Detection] = []
+        colors_with_reference = set(self._object_xy_by_color)
+        for color, reference in self._object_xy_by_color.items():
+            candidates = [item for item in detections if item.color == color]
+            if not candidates:
+                continue
+            nearest = min(
+                candidates,
+                key=lambda item: math.hypot(item.x - reference[0], item.y - reference[1]),
+            )
+            distance = math.hypot(nearest.x - reference[0], nearest.y - reference[1])
+            if distance <= self.object_association_max_distance_m:
+                associated.append(nearest)
+
+        associated.extend(
+            item for item in detections if item.color not in colors_with_reference
+        )
+        return associated
 
     def _workspace_mask(self, width: int, height: int) -> np.ndarray:
         u_min, u_max, v_min, v_max = self.roi

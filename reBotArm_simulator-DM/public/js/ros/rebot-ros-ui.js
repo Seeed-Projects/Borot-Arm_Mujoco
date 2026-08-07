@@ -29,6 +29,7 @@
     armStatus: `/${NS}/arm_status`,
     gripper: `/${NS}/gripper/state`,
     cameraImage: `/${NS}/mujoco/overhead_rgb/image_raw`,
+    objectStates: `/${NS}/mujoco/object_states`,
     visionDetections: `/${NS}/vision/color_blocks/detections`,
     simAnimation: `/${NS}/sim/animation_event`
   };
@@ -74,9 +75,9 @@
     visionFillPose: document.getElementById('ros-vision-fill-pose'),
     visionMoveAbove: document.getElementById('ros-vision-move-above'),
     visionPickDemo: document.getElementById('ros-vision-pick-demo'),
+    visionPlaceDemo: document.getElementById('ros-vision-place-demo'),
     vlim: document.getElementById('ros-vlim'),
     trajectoryDuration: document.getElementById('ros-trajectory-duration'),
-    requireConfirm: document.getElementById('ros-require-confirm'),
     poseX: document.getElementById('ros-pose-x'),
     poseY: document.getElementById('ros-pose-y'),
     poseZ: document.getElementById('ros-pose-z'),
@@ -107,21 +108,26 @@
   let listedTopics = new Set();
   let listedServices = new Set();
   let listedActionServers = new Set();
+  let simulationDriverDetected = false;
   let lowLevelPlayback = null;
   let lastTargetPoseSent = 0;
   let latestVisionPayload = null;
   let latestVisionAt = 0;
   let selectedVisionTarget = null;
   let lastVisionTarget = null;
+  let heldVisionTarget = null;
+  let autoVisionTargetColor = '';
   let visionSequenceBusy = false;
   let safeDisconnectBusy = false;
   let gravityCompensationActive = false;
+  let gravityStatusSource = 'initial';
   let gravityStatusPollInFlight = false;
 
   client.subscribe(REQUIRED_TOPICS.jointStates, 'sensor_msgs/msg/JointState', handleJointStates, { throttleRate: 80 });
   client.subscribe(REQUIRED_TOPICS.gripper, 'rebotarm_msgs/msg/JointMotorState', handleGripperState, { throttleRate: 80 });
   client.subscribe(REQUIRED_TOPICS.armStatus, 'rebotarm_msgs/msg/ArmStatus', handleArmStatus, { throttleRate: 200 });
-  client.subscribe(REQUIRED_TOPICS.cameraImage, 'sensor_msgs/msg/Image', handleCameraImage, { throttleRate: 120 });
+  client.subscribe(REQUIRED_TOPICS.cameraImage, 'sensor_msgs/msg/Image', handleCameraImage, { throttleRate: 250 });
+  client.subscribe(REQUIRED_TOPICS.objectStates, 'std_msgs/msg/String', handleMujocoObjectStates, { throttleRate: 33 });
   client.subscribe(REQUIRED_TOPICS.visionDetections, 'std_msgs/msg/String', handleVisionDetections, { throttleRate: 180 });
   client.subscribe(REQUIRED_TOPICS.simAnimation, 'std_msgs/msg/String', handleSimAnimationEvent, { throttleRate: 0 });
   if (els.cameraTopic) els.cameraTopic.textContent = REQUIRED_TOPICS.cameraImage;
@@ -134,7 +140,7 @@
     }
     updateDiagnostics();
     if (detail.state === 'closed' || detail.state === 'error') {
-      gravityCompensationActive = false;
+      updateGravityStatus(false, 'ROS 未连接', 'connection');
     }
     if (detail.state === 'open') {
       window.setTimeout(() => {
@@ -151,6 +157,10 @@
     client.connect(nextUrl);
   });
   els.disconnect.addEventListener('click', disconnectRos);
+  window.addEventListener('pagehide', () => {
+    client.autoReconnect = false;
+    if (client.socket) client.socket.close();
+  });
   els.enable.addEventListener('click', () => guardedCall(() => client.enable(), '已请求使能'));
   els.disable.addEventListener('click', () => {
     cancelLowLevelPlayback();
@@ -191,10 +201,14 @@
     collapseBtn.textContent = collapsed ? '▶' : '◀';
     collapseBtn.title = collapsed ? '展开侧边栏' : '折叠侧边栏';
  });
- if (els.visionColor) els.visionColor.addEventListener('change', updateSelectedVisionTarget);
+ if (els.visionColor) els.visionColor.addEventListener('change', () => {
+    if (els.visionColor.value === 'auto') autoVisionTargetColor = '';
+    updateSelectedVisionTarget();
+  });
   if (els.visionFillPose) els.visionFillPose.addEventListener('click', fillPoseFromVisionTarget);
   if (els.visionMoveAbove) els.visionMoveAbove.addEventListener('click', moveAboveVisionTarget);
   if (els.visionPickDemo) els.visionPickDemo.addEventListener('click', runVisionPickDemo);
+  if (els.visionPlaceDemo) els.visionPlaceDemo.addEventListener('click', runVisionPlaceDemo);
   if (els.stopPath) {
     els.stopPath.addEventListener('click', () => {
       cancelLowLevelPlayback();
@@ -232,6 +246,11 @@
       const mirrored = {};
       const now = performance.now();
       Object.entries(next).forEach(([name, value]) => {
+        // The hardware publishes a single finger travel in /joint_states.  The
+        // simulator's `gripper` joint represents the complete opening and must
+        // drive both fingers symmetrically, so do not write either URDF finger
+        // joint directly here.
+        if (name === 'finger_left' || name === 'finger_right') return;
         const holdUntil = mirrorHoldUntil.get(name) || 0;
         const target = simTargetAngles.get(name);
         const reachedTarget = typeof target === 'number' && Math.abs(target - value) < 0.025;
@@ -240,6 +259,22 @@
           mirrored[name] = value;
         }
       });
+
+      const leftOpening = Number(next.finger_left);
+      const rightOpening = Number(next.finger_right);
+      const fingerOpening = Number.isFinite(leftOpening)
+        ? leftOpening
+        : (Number.isFinite(rightOpening) ? -rightOpening : NaN);
+      if (Number.isFinite(fingerOpening)) {
+        const gripperWidth = fingerOpeningToGripperCommand(fingerOpening);
+        const holdUntil = mirrorHoldUntil.get('gripper') || 0;
+        const target = simTargetAngles.get('gripper');
+        const reachedTarget = typeof target === 'number' && Math.abs(target - gripperWidth) < 0.003;
+        if (reachedTarget || now > holdUntil) {
+          mirrorHoldUntil.delete('gripper');
+          mirrored.gripper = gripperWidth;
+        }
+      }
       if (Object.keys(mirrored).length) window.reBotSim.setAngles(mirrored, { source: 'ros' });
     }
     updateDiagnostics();
@@ -262,7 +297,7 @@
         window.reBotSim.setGripperWidth(msg.position, { source: 'ros', animate: false });
       }
     }
-    if (typeof msg.position === 'number' && simTargetAngles.has('gripper')) {
+    if (!visionSequenceBusy && typeof msg.position === 'number' && simTargetAngles.has('gripper')) {
       const target = simTargetAngles.get('gripper');
       const err = Math.abs(target - msg.position);
       if (err < 0.003) {
@@ -279,8 +314,10 @@
     const mode = msg.mode || 'unknown';
     const machine = msg.state_machine || 'unknown';
     const errors = Array.isArray(msg.error_codes) && msg.error_codes.length ? `，错误 ${msg.error_codes.join(', ')}` : '';
-    setMessage(`${enabled}，模式 ${mode}，状态 ${machine}${errors}`);
-    updateGravityStatus(machine === 'GRAVITY_COMP', machine);
+    if (!visionSequenceBusy) {
+      setMessage(`${enabled}，模式 ${mode}，状态 ${machine}${errors}`);
+    }
+    updateGravityStatus(machine === 'GRAVITY_COMP', machine, 'arm');
     updateDiagnostics();
   }
 
@@ -366,7 +403,7 @@
       true,
       options
     );
-    if (result) updateGravityStatus(Boolean(result.success), result.message || '');
+    if (result) updateGravityStatus(Boolean(result.success), result.message || '', 'service');
   }
 
   async function pollGravityCompensationStatus() {
@@ -402,6 +439,9 @@
       listedTopics = new Set(topicList);
       listedServices = new Set(serviceList);
       listedActionServers = new Set(actionList);
+      const hasSimulationTopics = topicList.includes(REQUIRED_TOPICS.cameraImage)
+        || topicList.includes(REQUIRED_TOPICS.objectStates)
+        || topicList.includes(REQUIRED_TOPICS.visionDetections);
       writeLog(
         `rosapi: ${topicList.length} topics, ${serviceList.length} services, ${actionList.length} actions`,
         'ok'
@@ -412,6 +452,7 @@
       if (!listedServices.has(REQUIRED_SERVICES.gravityStatus)) {
         updateGravityStatus(false, '服务不可用');
       }
+      if (hasSimulationTopics) markSimulationDriverDetected('rosapi 仿真话题');
       if (!hasActionServer(`/${NS}/follow_joint_trajectory`)) {
         writeLog('未发现轨迹动作接口，轨迹按钮将使用低层回放', 'info');
       }
@@ -490,7 +531,16 @@
   }
 
   function shouldUseLowLevelTrajectory() {
-    return !hasActionServer(`/${NS}/follow_joint_trajectory`);
+    return simulationDriverDetected
+      || client.getLastMessageAt(REQUIRED_TOPICS.cameraImage) > 0
+      || client.getLastMessageAt(REQUIRED_TOPICS.objectStates) > 0
+      || !hasActionServer(`/${NS}/follow_joint_trajectory`);
+  }
+
+  function markSimulationDriverDetected(reason) {
+    if (simulationDriverDetected) return;
+    simulationDriverDetected = true;
+    writeLog(`已检测到仿真驱动（${reason}），轨迹按钮将使用低层回放`, 'info');
   }
 
   function hasActionServer(actionName) {
@@ -528,7 +578,7 @@
     };
   }
 
-  function controlAllowed(interactive, options) {
+  function controlAllowed(interactive) {
     if (!client.connected) {
       if (interactive) setStatus('closed', 'ROS 未连接');
       return false;
@@ -536,14 +586,6 @@
     if (!els.control.checked) {
       if (interactive) setMessage('控制锁未打开，网页只更新仿真，不会控制 ROS。');
       return false;
-    }
-    if (
-      interactive &&
-      !(options && options.skipConfirm) &&
-      els.requireConfirm.checked &&
-      !shouldUseLowLevelTrajectory()
-    ) {
-      return window.confirm('确认发送这条指令？');
     }
     return true;
   }
@@ -693,6 +735,7 @@
   }
 
   function handleCameraImage(msg) {
+    markSimulationDriverDetected('MuJoCo 相机反馈');
     if (!els.cameraCanvas || !msg) return;
     const width = Number(msg.width) || 0;
     const height = Number(msg.height) || 0;
@@ -784,6 +827,7 @@
   }
 
   function handleVisionDetections(msg) {
+    markSimulationDriverDetected('仿真视觉反馈');
     if (!els.visionStatus && !els.visionTarget) return;
     let payload = null;
     try {
@@ -800,6 +844,19 @@
       els.visionStatus.textContent = count ? `${count} 个 / 目标 ${payload.target_color || '--'}` : '未发现';
     }
     updateSelectedVisionTarget();
+  }
+
+  function handleMujocoObjectStates(msg) {
+    let payload = null;
+    try {
+      payload = JSON.parse(msg && msg.data ? msg.data : '{}');
+    } catch (error) {
+      return;
+    }
+    markSimulationDriverDetected('MuJoCo 物体状态反馈');
+    if (window.reBotSim && typeof window.reBotSim.syncMujocoObjectStates === 'function') {
+      window.reBotSim.syncMujocoObjectStates(payload.objects || []);
+    }
   }
 
   function handleSimAnimationEvent(msg) {
@@ -823,8 +880,15 @@
   }
 
   function updateSelectedVisionTarget() {
-    const target = chooseVisionTarget();
+    const mode = els.visionColor ? String(els.visionColor.value || 'auto') : 'auto';
+    const target = mode === 'auto'
+      ? (chooseVisionTarget(autoVisionTargetColor) || chooseRandomVisionTarget())
+      : chooseVisionTarget(mode);
     selectedVisionTarget = target;
+    renderVisionTarget(target);
+  }
+
+  function renderVisionTarget(target) {
     if (!els.visionTarget) return;
     if (!target) {
       els.visionTarget.textContent = '--';
@@ -835,6 +899,22 @@
     els.visionTarget.textContent = `${target.color} x ${Number(target.x).toFixed(3)} y ${Number(target.y).toFixed(3)} z ${approachZ.toFixed(3)} / 夹紧 ${Math.round(graspPlan.physicalGap * 1000)}mm / yaw ${Math.round(graspPlan.yawRad * 180 / Math.PI)}deg`;
   }
 
+  function chooseRandomVisionTarget() {
+    const detections = latestVisionPayload && Array.isArray(latestVisionPayload.detections)
+      ? latestVisionPayload.detections
+      : [];
+    const colors = [...new Set(
+      detections
+        .filter((item) => item && item.color)
+        .map((item) => String(item.color))
+    )];
+    if (!colors.length) return null;
+    const alternatives = colors.filter((color) => color !== autoVisionTargetColor);
+    const pool = alternatives.length ? alternatives : colors;
+    autoVisionTargetColor = pool[Math.floor(Math.random() * pool.length)];
+    return chooseVisionTarget(autoVisionTargetColor);
+  }
+
   function chooseVisionTarget(preferredColor) {
     const detections = latestVisionPayload && Array.isArray(latestVisionPayload.detections)
       ? latestVisionPayload.detections
@@ -842,9 +922,40 @@
     if (!detections.length) return null;
     const color = preferredColor || (els.visionColor ? String(els.visionColor.value || 'auto') : 'auto');
     if (color && color !== 'auto') {
-      return detections.find((item) => item && item.color === color) || null;
+      return chooseMujocoAssociatedDetection(
+        color,
+        detections.filter((item) => item && item.color === color)
+      );
     }
-    return latestVisionPayload.target || detections[0] || null;
+    const payloadTarget = latestVisionPayload.target;
+    if (payloadTarget && payloadTarget.color) {
+      const associated = chooseMujocoAssociatedDetection(
+        String(payloadTarget.color),
+        detections.filter((item) => item && item.color === payloadTarget.color)
+      );
+      if (associated) return associated;
+    }
+    return detections[0] || null;
+  }
+
+  function chooseMujocoAssociatedDetection(color, candidates) {
+    if (!Array.isArray(candidates) || !candidates.length) return null;
+    if (!window.reBotSim || typeof window.reBotSim.getSceneCollisionMap !== 'function') {
+      return candidates[0];
+    }
+    const map = window.reBotSim.getSceneCollisionMap();
+    const expected = map && map.source === 'mujoco_object_states'
+      && map.objects && map.objects[color] && map.objects[color].position;
+    if (!expected) return candidates[0];
+
+    const ranked = candidates
+      .map((item) => ({
+        item,
+        distance: Math.hypot(Number(item.x) - expected.x, Number(item.y) - expected.y)
+      }))
+      .filter((entry) => Number.isFinite(entry.distance))
+      .sort((a, b) => a.distance - b.distance);
+    return ranked.length && ranked[0].distance <= 0.055 ? ranked[0].item : null;
   }
 
   async function waitForFreshVisionTarget(preferredColor, timeoutMs) {
@@ -872,14 +983,22 @@
 
   async function moveAboveVisionTarget() {
     if (!controlAllowed(true)) return;
-    const target = selectedVisionTarget || chooseVisionTarget();
+    const mode = els.visionColor ? String(els.visionColor.value || 'auto') : 'auto';
+    const target = mode === 'auto'
+      ? (chooseRandomVisionTarget() || selectedVisionTarget || chooseVisionTarget())
+      : (selectedVisionTarget || chooseVisionTarget(mode));
     const pose = poseFromVisionTarget(getVisionApproachZ(target), target);
     if (!pose) return;
+    if (mode === 'auto') {
+      selectedVisionTarget = target;
+      renderVisionTarget(target);
+      writeLog(`自动目标随机选择：${target.color}`, 'info');
+    }
     const previousTarget = lastVisionTarget && !sameVisionTarget(lastVisionTarget, target)
       ? lastVisionTarget
       : null;
     const duration = getPoseDuration();
-    setVisionBusy(true);
+    setVisionBusy(true, 'move');
     try {
       const route = buildVisionTransitRoute(previousTarget, target);
       for (const waypoint of route) {
@@ -901,6 +1020,14 @@
     if (!controlAllowed(true)) return;
     const preferredColor = els.visionColor ? String(els.visionColor.value || 'auto') : 'auto';
     let target = await waitForFreshVisionTarget(preferredColor, 700);
+    if (preferredColor === 'auto') {
+      target = chooseRandomVisionTarget() || target;
+      if (target) {
+        selectedVisionTarget = target;
+        renderVisionTarget(target);
+        writeLog(`自动目标随机选择：${target.color}`, 'info');
+      }
+    }
     if (!target) {
       setMessage('没有可用的视觉目标。');
       return;
@@ -928,7 +1055,7 @@
       return result;
     };
 
-    setVisionBusy(true);
+    setVisionBusy(true, 'pick');
     try {
       releaseSimCarriedObject();
       await commandGripperAndWait(OPEN_GRIPPER_M, '视觉抓取：夹爪完全打开', {
@@ -998,6 +1125,63 @@
       writeLog(`视觉抓取演示完成，夹爪指令 ${Math.round(plan.graspPlan.command * 1000)} 毫米`, 'ok');
     } catch (error) {
       const message = error && error.message ? error.message : '视觉抓取流程中止';
+      setMessage(message);
+      writeLog(message, 'warn');
+    } finally {
+      setVisionBusy(false);
+    }
+  }
+
+  async function runVisionPlaceDemo() {
+    if (visionSequenceBusy) return;
+    if (!controlAllowed(true)) return;
+
+    const simCarriedColor = window.reBotSim && typeof window.reBotSim.getCarriedObject === 'function'
+      ? window.reBotSim.getCarriedObject()
+      : '';
+    const target = heldVisionTarget
+      || (simCarriedColor && lastVisionTarget && String(lastVisionTarget.color) === String(simCarriedColor)
+        ? lastVisionTarget
+        : null);
+    if (!target) {
+      setMessage('当前没有已夹持的视觉物体，请先执行视觉抓取。');
+      writeLog('放下物体已忽略：当前没有已夹持目标', 'warn');
+      return;
+    }
+
+    const plan = buildVisionPickPlan(target);
+    if (!plan) return;
+    const duration = getPoseDuration();
+    setVisionBusy(true, 'place');
+    try {
+      await runVisionMoveStep(
+        plan.approachPose,
+        Math.max(1.1, duration * 0.65),
+        `视觉放置：移动到 ${target.color} 放置点上方`
+      );
+      await runVisionMoveStep(
+        plan.graspPose,
+        Math.max(1.1, duration * 0.65),
+        `视觉放置：垂直下探 ${target.color}`
+      );
+      await commandGripperAndWait(OPEN_GRIPPER_M, `视觉放置：打开夹爪释放 ${target.color}`, {
+        timeoutMs: 2600,
+        minWaitMs: 850,
+        tolerance: 0.006,
+        requireReached: true,
+        afterMs: 220
+      });
+      releaseSimCarriedObject();
+      await runVisionMoveStep(
+        plan.approachPose,
+        Math.max(1.5, duration * 0.8),
+        `视觉放置：释放后抬升 ${target.color}`
+      );
+      lastVisionTarget = cloneVisionTarget(target);
+      setMessage(`视觉放置完成：${target.color} 已释放，机械臂已抬升`);
+      writeLog(`视觉放置完成：${target.color} 已释放并抬升`, 'ok');
+    } catch (error) {
+      const message = error && error.message ? error.message : '视觉放置流程中止';
       setMessage(message);
       writeLog(message, 'warn');
     } finally {
@@ -1119,7 +1303,7 @@
   }
 
   async function sendVisionMoveGoal(pose, duration, optimisticMessage) {
-    if (!hasActionServer(`/${NS}/move_to_pose`)) {
+    if (shouldUseLowLevelTrajectory() || !hasActionServer(`/${NS}/move_to_pose`)) {
       return moveToPoseViaIkTrajectory(pose, duration, optimisticMessage);
     }
 
@@ -1255,13 +1439,16 @@
 
   function attachSimCarriedObject(target) {
     const color = target && target.color ? String(target.color) : '';
-    if (!color || !window.reBotSim || typeof window.reBotSim.attachObject !== 'function') return;
+    if (!color) return;
+    heldVisionTarget = cloneVisionTarget(target);
+    if (!window.reBotSim || typeof window.reBotSim.attachObject !== 'function') return;
     if (window.reBotSim.attachObject(color)) {
       writeLog(`网页动画：${color} 已绑定到夹爪跟随`, 'ok');
     }
   }
 
   function releaseSimCarriedObject() {
+    heldVisionTarget = null;
     if (!window.reBotSim || typeof window.reBotSim.releaseObject !== 'function') return;
     if (window.reBotSim.releaseObject({ settleOnTable: true })) {
       writeLog('网页动画：已释放上一件跟随物体', 'info');
@@ -1341,11 +1528,15 @@
     return clamp(Number(els.poseDuration && els.poseDuration.value) || 2, 0.4, 8);
   }
 
-  function setVisionBusy(busy) {
+  function setVisionBusy(busy, operation) {
     visionSequenceBusy = busy;
     if (els.visionPickDemo) {
       els.visionPickDemo.disabled = busy;
-      els.visionPickDemo.textContent = busy ? '演示中...' : '视觉抓取演示';
+      els.visionPickDemo.textContent = busy && operation === 'pick' ? '抓取中...' : '视觉抓取';
+    }
+    if (els.visionPlaceDemo) {
+      els.visionPlaceDemo.disabled = busy;
+      els.visionPlaceDemo.textContent = busy && operation === 'place' ? '放置中...' : '放下物体';
     }
     if (els.visionMoveAbove) els.visionMoveAbove.disabled = busy;
     if (els.visionFillPose) els.visionFillPose.disabled = busy;
@@ -1377,14 +1568,26 @@
     els.feedbackError.style.color = maxError < 0.035 ? '#d7fff4' : (maxError < 0.12 ? '#ffe0b0' : '#ffd1c9');
   }
 
-  function updateGravityStatus(active, detail) {
-    gravityCompensationActive = Boolean(active);
+  function updateGravityStatus(active, detail, source) {
+    const nextActive = Boolean(active);
+    const nextSource = source || 'system';
+    // ArmStatus arrives faster than the detailed status service. Once the
+    // service has supplied its lock-target text, do not let the short machine
+    // state overwrite it on every ArmStatus message and make the UI flicker.
+    if (
+      nextSource === 'arm' &&
+      gravityStatusSource === 'service' &&
+      nextActive === gravityCompensationActive
+    ) return;
+
+    gravityCompensationActive = nextActive;
+    gravityStatusSource = nextSource;
     if (!els.gravityStatus) return;
-    els.gravityStatus.textContent = active ? '运行中' : '未运行';
+    els.gravityStatus.textContent = nextActive ? '运行中' : '未运行';
     if (detail && detail !== 'GRAVITY_COMP') {
       els.gravityStatus.textContent += ` / ${detail}`;
     }
-    els.gravityStatus.style.color = active ? '#d7fff4' : '#ffe0b0';
+    els.gravityStatus.style.color = nextActive ? '#d7fff4' : '#ffe0b0';
   }
 
   function maybeSendGripper(position) {
@@ -1588,7 +1791,9 @@
   }
 
   function setMessage(message) {
-    if (els.message) els.message.textContent = message || '';
+    if (!els.message) return;
+    const next = message || '';
+    if (els.message.textContent !== next) els.message.textContent = next;
   }
 
   function writeLog(message, level) {

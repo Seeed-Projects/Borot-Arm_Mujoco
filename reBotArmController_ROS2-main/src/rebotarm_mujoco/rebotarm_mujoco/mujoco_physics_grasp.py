@@ -82,7 +82,7 @@ class MujocoPhysicsGrasp(Node):
         self.model_path = MujocoReal2Sim._resolve_package_path(
             str(self.get_parameter("model_path").value or ""),
             "models",
-            "rebotarm_b601_stl.xml",
+            "rebotarm_b601_colored.xml",
         )
         joint_map_path = MujocoReal2Sim._resolve_package_path(
             str(self.get_parameter("joint_map_file").value or ""),

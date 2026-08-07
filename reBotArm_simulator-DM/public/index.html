@@ -12,7 +12,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="apple-touch-icon" href="/favicon.png">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/css/rebot-sim.css">
+  <link rel="stylesheet" href="/css/rebot-sim.css?v=20260806-randomplace1">
 </head>
 <body>
   <main class="app-shell">
@@ -186,6 +186,7 @@
           <button type="button" id="ros-vision-fill-pose">填入 Pose</button>
           <button type="button" id="ros-vision-move-above">移动到目标上方</button>
           <button type="button" id="ros-vision-pick-demo">视觉抓取</button>
+          <button type="button" id="ros-vision-place-demo">放下物体</button>
         </div>
       </div>
 
@@ -198,10 +199,6 @@
         <label class="field-row">
           <span>轨迹总时长 s</span>
           <input id="ros-trajectory-duration" type="number" min="1" max="30" step="0.5" value="6">
-        </label>
-        <label class="switch-row">
-          <input type="checkbox" id="ros-require-confirm" checked>
-          <span>执行前二次确认</span>
         </label>
       </div>
 
@@ -345,9 +342,9 @@
   <script src="/lib/three-r128.min.js"></script>
   <script src="/lib/STLLoader-umd.js"></script>
   <script src="/lib/URDFLoader.js"></script>
-  <script src="/js/ros/rebot-ros-client.js?v=20260728-cleanup1"></script>
-  <script src="/js/rebot-sim.js?v=20260728-cleanup1"></script>
-  <script src="/js/ros/rebot-ros-ui.js?v=20260728-cleanup1"></script>
+  <script src="/js/ros/rebot-ros-client.js?v=20260806-objectfeedback1"></script>
+  <script src="/js/rebot-sim.js?v=20260807-metalpalmplate1"></script>
+  <script src="/js/ros/rebot-ros-ui.js?v=20260807-objectassociation1"></script>
   <script src="/js/rebot-llm.js?v=20260728-cleanup1"></script>
 </body>
 </html>

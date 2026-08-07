@@ -10,7 +10,15 @@ cd ~/reBotArmController_ROS2-main
 source scripts/source_rebotarm_env.sh
 colcon build --symlink-install --packages-select rebotarm_mujoco
 source install/setup.bash
-REAL2SIM_MODEL=stl ./scripts/start_real2sim.sh
+./scripts/start_real2sim.sh
+```
+
+The Seeed-style black, silver, and yellow model is the default. It keeps the
+same MuJoCo joints, inertials, and collision geometry as the legacy STL model.
+To open the legacy single-material model explicitly:
+
+```bash
+REAL2SIM_MODEL=legacy ./scripts/start_real2sim.sh
 ```
 
 `start_real2sim.sh` opens the MuJoCo viewer and mirrors `/rebotarm/joint_states`.
@@ -25,14 +33,14 @@ ros2 service call /rebotarm/gravity_compensation/stop std_srvs/srv/Trigger
 ros2 service call /rebotarm/gravity_compensation/status std_srvs/srv/Trigger
 ```
 
-The main GUI entry uses the STL visual model. Rebuild the package first so the
-STL files from `rebotarm_bringup/description/meshes` are installed into the
-MuJoCo package share directory:
+The main GUI entry uses the colored STL visual model. Rebuild the package first
+so the split STL files from `rebotarm_bringup/description/meshes` are installed
+into the MuJoCo package share directory:
 
 ```bash
 colcon build --symlink-install --packages-select rebotarm_mujoco
 source install/setup.bash
-REAL2SIM_MODEL=stl ./scripts/start_real2sim.sh
+./scripts/start_real2sim.sh
 ```
 
 The STL model uses `joint_map_kinematic.yaml`, where the single ROS `finger_left`
@@ -61,7 +69,7 @@ Run the MuJoCo torque node:
 
 By default it:
 
-- uses the STL model.
+- uses the colored STL model.
 - follows `/rebotarm/joint_states` as the MuJoCo torque-loop target.
 - computes MuJoCo gravity torques.
 - loads `reBotArm_control_py` when available and compares SDK `tau_g`.
@@ -92,7 +100,7 @@ ros2 topic echo /rebotarm/mujoco/tau_g_diff --once
 Useful environment variables:
 
 ```bash
-MUJOCO_TORQUE_MODEL=stl
+MUJOCO_TORQUE_MODEL=colored
 MUJOCO_TORQUE_OPEN_VIEWER=false
 MUJOCO_TORQUE_COMPARE_TOPIC=/rebotarm/joint_states
 MUJOCO_TORQUE_TARGET_TOPIC=/rebotarm/joint_states
