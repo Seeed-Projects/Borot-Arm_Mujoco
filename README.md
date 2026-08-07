@@ -9,15 +9,15 @@
 - **机械臂**: reBot Arm B601-DM
 - **电机**: 达妙 4340P（joint1-3）+ 4310（joint4-6 + 夹爪）
 - **通信**: USB-CAN（`/dev/ttyACM0`）
-- **主机**: Ubuntu 24.04 + ROS 2 Jazzy + Python 3.12
+- **主机**: Ubuntu 24.04 + ROS 2 Jazzy + Python 3.12，或 Ubuntu 22.04 + ROS 2 Humble + Python 3.10
 
 ## 软件前置条件
 
 | 组件 | 版本 | 安装方式 |
 | --- | --- | --- |
-| Ubuntu | 24.04 | 系统 |
-| ROS 2 | Jazzy | `apt install ros-jazzy-desktop` |
-| Python | 3.12 | 系统自带 |
+| Ubuntu | 24.04 或 22.04 | 系统 |
+| ROS 2 | Jazzy 或 Humble | `apt install ros-${ROS_DISTRO}-desktop` |
+| Python | 3.12 或 3.10 | 系统自带 |
 | Node.js | ≥ 18 | `apt install nodejs` |
 | MuJoCo | 3.10+ | `pip install mujoco` |
 | Pinocchio | 4.1+ | `pip install pin` |
@@ -39,7 +39,7 @@
 
 | 依赖 | 来源 | 用途 | 安装方式 |
 | --- | --- | --- | --- |
-| ROS 2 Jazzy | 系统 | rclpy、消息类型、rosbridge | `apt install ros-jazzy-desktop ros-jazzy-rosbridge-suite` |
+| ROS 2 (Jazzy/Humble) | 系统 | rclpy、消息类型、rosbridge | `apt install ros-${ROS_DISTRO}-desktop ros-${ROS_DISTRO}-rosbridge-suite` |
 | reBotArm_control_py SDK | GitHub | RebotArm、IK、动力学、重力补偿 | 见下方安装步骤 |
 | motorbridge | pip | 达妙电机 CAN 通信 | `pip install motorbridge` |
 | pinocchio (pin) | pip (cmeel) | 刚体动力学模型 | `pip install pin` |
@@ -55,14 +55,14 @@
 ### 1. 系统前置
 
 ```bash
-# ROS 2 Jazzy（如未安装）
-sudo apt update && sudo apt install -y ros-jazzy-desktop ros-jazzy-rosbridge-suite
+# ROS 2（Jazzy 或 Humble，如未安装）
+sudo apt update && sudo apt install -y ros-${ROS_DISTRO}-desktop ros-${ROS_DISTRO}-rosbridge-suite
 
 # Node.js（网页控制台）
 sudo apt install -y nodejs
 
 # 验证
-ros2 --version    # Jazzy
+ros2 --version    # Jazzy 或 Humble
 node --version    # >= 18
 ```
 
@@ -356,14 +356,6 @@ SDK 配置文件：`~/reBotArm_control_py/config/rebotarm_dm.yaml`
 
 这些参数存储在电机固件寄存器中，由 SDK 在 `ensure_mode(Mode.POS_VEL)` 时写入。修改 PID 需编辑 `rebotarm_dm.yaml` 对应关节的 `POS_VEL` 段后重启控制器。
 
-#### 夹爪单位换算
-
-网页和 ROS 接口使用**米**（0.0 = 完全闭合，0.09 = 完全张开），电机固件使用**弧度**（0.0 = 闭合，−5.0 = 张开）。换算在 `HardwareManager` 中完成：
-
-```
-弧度 = (距离_m / 0.09) × (−5.0)
-距离_m = (弧度 / −5.0) × 0.09
-```
 
 
 ### 网页 rosbridge 地址
@@ -374,7 +366,7 @@ rosbridge WebSocket 地址由用户在网页「ROS2 桥接」面板手动输入�
 
 `scripts/source_rebotarm_env.sh` 按顺序加载：
 
-1. ROS 2 Jazzy（`/opt/ros/jazzy/setup.bash`）
+1. ROS 2（`/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash`）
 2. Python venv（`.venv/bin/activate`）
 3. cmeel.prefix 路径（Pinocchio 的 C 扩展和共享库）
 4. 工作空间（`install/setup.bash`）
