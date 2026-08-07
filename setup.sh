@@ -94,11 +94,11 @@ log 'Checking supported platform'
 if [[ -r /etc/os-release ]]; then
   # shellcheck source=/dev/null
   source /etc/os-release
-  if [[ "${ID:-}" == ubuntu && "${VERSION_ID:-}" == 24.04 ]]; then
-    record_skipped "Ubuntu ${VERSION_ID} supported"
-  else
-    record_mismatch "expected Ubuntu 24.04; found ${PRETTY_NAME:-unknown}"
-  fi
+  case "${ID:-}:${VERSION_ID:-}" in
+    ubuntu:24.04) ROS_DISTRO=jazzy; PY_SITE=python3.12; record_skipped "Ubuntu ${VERSION_ID} supported" ;;
+    ubuntu:22.04) ROS_DISTRO=humble; PY_SITE=python3.10; record_skipped "Ubuntu ${VERSION_ID} supported" ;;
+    *) ROS_DISTRO=jazzy; PY_SITE=python3.12; record_mismatch "expected Ubuntu 24.04 or 22.04; found ${PRETTY_NAME:-unknown}" ;;
+  esac
 else
   record_mismatch 'cannot identify operating system'
 fi
@@ -112,10 +112,10 @@ APT_PACKAGES=(
   python3 python3-venv python3-pip
   nodejs npm
   ros-dev-tools
-  ros-jazzy-desktop
-  ros-jazzy-rosbridge-suite
-  ros-jazzy-moveit
-  ros-jazzy-tf-transformations
+  ros-${ROS_DISTRO}-desktop
+  ros-${ROS_DISTRO}-rosbridge-suite
+  ros-${ROS_DISTRO}-moveit
+  ros-${ROS_DISTRO}-tf-transformations
 )
 MISSING_APT=()
 apt_capability_available() {
@@ -123,11 +123,11 @@ apt_capability_available() {
     nodejs) have node ;;
     npm) have npm ;;
     ros-dev-tools) have colcon && have rosdep ;;
-    ros-jazzy-rosbridge-suite) [[ -d /opt/ros/jazzy/share/rosbridge_server ]] ;;
-    ros-jazzy-moveit) [[ -d /opt/ros/jazzy/share/moveit_ros_move_group ]] ;;
-    ros-jazzy-tf-transformations)
-      [[ -d /opt/ros/jazzy/lib/python3.12/site-packages/tf_transformations || \
-         -d "${VENV_DIR}/lib/python3.12/site-packages/tf_transformations" ]]
+    ros-${ROS_DISTRO}-rosbridge-suite) [[ -d /opt/ros/${ROS_DISTRO}/share/rosbridge_server ]] ;;
+    ros-${ROS_DISTRO}-moveit) [[ -d /opt/ros/${ROS_DISTRO}/share/moveit_ros_move_group ]] ;;
+    ros-${ROS_DISTRO}-tf-transformations)
+      [[ -d /opt/ros/${ROS_DISTRO}/lib/${PY_SITE}/site-packages/tf_transformations || \
+         -d "${VENV_DIR}/lib/${PY_SITE}/site-packages/tf_transformations" ]]
       ;;
     *) return 1 ;;
   esac
@@ -148,7 +148,7 @@ if ((${#MISSING_APT[@]})); then
     for package in "${MISSING_APT[@]}"; do record_failed "missing apt package ${package}"; done
   else
     log "Installing missing system packages: ${MISSING_APT[*]}"
-    if ! apt-cache show ros-jazzy-desktop >/dev/null 2>&1; then
+    if ! apt-cache show ros-${ROS_DISTRO}-desktop >/dev/null 2>&1; then
       log 'ROS apt repository is missing; installing the official ros2-apt-source package'
       if ! run_sudo apt-get update; then
         record_mismatch 'apt update reported an error; preserving user-configured sources and continuing with available package indexes'
@@ -180,10 +180,10 @@ fi
 log 'Checking runtime versions'
 if have python3; then
   py_version="$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')"
-  if python3 -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'; then
+  if python3 -c 'import sys; raise SystemExit(0 if sys.version_info[:2] in ((3, 12), (3, 10)) else 1)'; then
     record_skipped "Python ${py_version} compatible"
   else
-    record_mismatch "expected Python 3.12; found ${py_version}"
+    record_mismatch "expected Python 3.12 or 3.10; found ${py_version}"
   fi
 else
   record_failed 'python3 command missing'
@@ -295,7 +295,7 @@ else
   record_installed "created ${WEB_DIR}/.env from example"
 fi
 
-if [[ -f "/opt/ros/jazzy/setup.bash" ]]; then
+if [[ -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
   if ((CHECK_ONLY)); then
     [[ -f "${WS_DIR}/install/setup.bash" ]] \
       && record_skipped 'ROS workspace is built' \
@@ -303,7 +303,7 @@ if [[ -f "/opt/ros/jazzy/setup.bash" ]]; then
   else
     log 'Resolving ROS dependencies and building the workspace'
     # shellcheck source=/dev/null
-    source /opt/ros/jazzy/setup.bash
+    source /opt/ros/${ROS_DISTRO}/setup.bash
     if have rosdep; then
       if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
         if ! run_sudo rosdep init; then
@@ -328,12 +328,12 @@ if [[ -f "/opt/ros/jazzy/setup.bash" ]]; then
     record_installed 'ROS workspace built with colcon'
   fi
 else
-  record_failed '/opt/ros/jazzy/setup.bash missing'
+  record_failed "/opt/ros/${ROS_DISTRO}/setup.bash missing"
 fi
 
 log 'Final import checks'
 if [[ -x "${VENV_DIR}/bin/python" && -n "${SDK_DIR}" ]]; then
-  if PYTHONPATH="${SDK_DIR}:${VENV_DIR}/lib/python3.12/site-packages:${PYTHONPATH:-}" \
+  if PYTHONPATH="${SDK_DIR}:${VENV_DIR}/lib/${PY_SITE}/site-packages:${PYTHONPATH:-}" \
     "${VENV_DIR}/bin/python" -c 'import mujoco, pinocchio, motorbridge, transforms3d, tf_transformations, fastmcp, openai, reBotArm_control_py'; then
     record_skipped 'critical Python and SDK imports pass'
   else
