@@ -1,5 +1,6 @@
 (function () {
-  const DEG = Math.PI / 180;
+const t = window.rebotI18n ? window.rebotI18n.t : (k) => k;
+ const DEG = Math.PI / 180;
   const RAD = 180 / Math.PI;
   const NOMINAL_REACH = 0.65;
   const GRIPPER_COMMAND_MAX = 0.09;
@@ -43,24 +44,24 @@
     carriage: [4370, 400]
   };
 
-  const jointDefs = [
-    { name: 'joint1', label: 'J1 底座偏航', min: -2.8, max: 2.8, home: 0 },
-    { name: 'joint2', label: 'J2 肩部', min: -3.14, max: 0, home: 0 },
-    { name: 'joint3', label: 'J3 肘部', min: -3.14, max: 0, home: 0 },
-    { name: 'joint4', label: 'J4 腕部俯仰', min: -1.87, max: 1.57, home: 0 },
-    { name: 'joint5', label: 'J5 腕部偏航', min: -1.57, max: 1.57, home: 0 },
-    { name: 'joint6', label: 'J6 工具旋转', min: -3.14, max: 3.14, home: 0 },
-    { name: 'gripper', label: 'J7 夹爪', min: 0, max: GRIPPER_COMMAND_MAX, home: 0, unit: 'm' }
-  ];
+ const jointDefs = [
+    { name: 'joint1', label: 'joint.j1', min: -2.8, max: 2.8, home: 0 },
+    { name: 'joint2', label: 'joint.j2', min: -3.14, max: 0, home: 0 },
+    { name: 'joint3', label: 'joint.j3', min: -3.14, max: 0, home: 0 },
+    { name: 'joint4', label: 'joint.j4', min: -1.87, max: 1.57, home: 0 },
+    { name: 'joint5', label: 'joint.j5', min: -1.57, max: 1.57, home: 0 },
+    { name: 'joint6', label: 'joint.j6', min: -3.14, max: 3.14, home: 0 },
+    { name: 'gripper', label: 'joint.gripper', min: 0, max: GRIPPER_COMMAND_MAX, home: 0, unit: 'm' }
+ ];
 
-  const presets = {
-    ready: { label: '就绪', angles: [0, 0, 0, 0, 0, 0, 0] },
-    forward: { label: '前方工作', angles: [0, -25, -35, 28, 0, 0, 90] },
-    left: { label: '左侧抓取', angles: [42, -25, -45, 32, 18, 0, 90] },
-    right: { label: '右侧放置', angles: [-42, -25, -45, 32, -18, 0, 20] },
-    inspect: { label: '检测', angles: [18, -36, -26, -16, 45, 90, 45] },
-    fold: { label: '折叠', angles: [0, -88, -118, 78, 0, 0, 0] }
-  };
+ const presets = {
+    ready: { label: 'preset.ready', angles: [0, 0, 0, 0, 0, 0, 0] },
+    forward: { label: 'preset.forward', angles: [0, -25, -35, 28, 0, 0, 90] },
+    left: { label: 'preset.left', angles: [42, -25, -45, 32, 18, 0, 90] },
+    right: { label: 'preset.right', angles: [-42, -25, -45, 32, -18, 0, 20] },
+    inspect: { label: 'preset.inspect', angles: [18, -36, -26, -16, 45, 90, 45] },
+    fold: { label: 'preset.fold', angles: [0, -88, -118, 78, 0, 0, 0] }
+ };
 
   let scene;  let camera;
   let renderer;
@@ -150,9 +151,9 @@
   function buildControls() {
     Object.entries(presets).forEach(([key, preset]) => {
       const button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = preset.label;
-      button.addEventListener('click', () => applyPreset(key, false, { source: 'preset' }));
+     button.type = 'button';
+      button.textContent = t(preset.label);
+     button.addEventListener('click', () => applyPreset(key, false, { source: 'preset' }));
       els.presets.appendChild(button);
     });
 
@@ -161,8 +162,8 @@
       wrap.className = 'joint-control';
 
       const head = document.createElement('div');
-      head.className = 'joint-head';
-      head.innerHTML = `<strong>${joint.label}</strong><span class="joint-value" id="${joint.name}-value">0.0 度</span>`;
+     head.className = 'joint-head';
+      head.innerHTML = `<strong>${t(joint.label)}</strong><span class="joint-value" id="${joint.name}-value">${t('joint.degSuffix', { val: '0.0' })}</span>`;
 
       const range = document.createElement('input');
       range.type = 'range';
@@ -341,9 +342,9 @@
 
   function createDirectionAxes() {
     const origin = new THREE.Vector3(0, 0.006, 0);
-    addArrow(origin, new THREE.Vector3(1, 0, 0), 0xef5a4d, 'ROS +X 前方');
-    addArrow(origin, new THREE.Vector3(0, 0, -1), 0x77c96b, 'ROS +Y 左侧');
-    addArrow(origin, new THREE.Vector3(0, 1, 0), 0x5fa8ff, 'ROS +Z 向上');
+    addArrow(origin, new THREE.Vector3(1, 0, 0), 0xef5a4d, t('app.axisX'));
+    addArrow(origin, new THREE.Vector3(0, 0, -1), 0x77c96b, t('app.axisY'));
+    addArrow(origin, new THREE.Vector3(0, 1, 0), 0x5fa8ff, t('app.axisZ'));
   }
 
   function addArrow(origin, dir, color, label) {
@@ -400,13 +401,13 @@
 
   function createTaskSpace() {
     const group = new THREE.Group();
-    addZone(group, 'Pick zone', 0.42, -0.13, 0x3f9f56, 0.57, 0.24);
-    addZone(group, 'Place zone', 0.42, 0.13, 0x777368, 0.57, 0.24);
+    addZone(group, 'sim.pickZone', 0.42, -0.13, 0x3f9f56, 0.57, 0.24);
+    addZone(group, 'sim.placeZone', 0.42, 0.13, 0x777368, 0.57, 0.24);
 
     const objects = [
       {
         key: 'red',
-        label: '红色方块',
+        label: 'sim.redBlock',
         color: 0xd52b21,
         material: { roughness: 0.25, metalness: 0.03, clearcoat: 0.52, clearcoatRoughness: 0.18 },
         position: [0.34, -0.13, 0.055],
@@ -415,7 +416,7 @@
       },
       {
         key: 'blue',
-        label: '蓝色方块',
+        label: 'sim.blueBlock',
         color: 0x008fc5,
         material: { roughness: 0.38, metalness: 0.08, clearcoat: 0.28, clearcoatRoughness: 0.3 },
         position: [0.50, 0.11, 0.048],
@@ -424,7 +425,7 @@
       },
       {
         key: 'yellow',
-        label: '圆柱',
+        label: 'sim.cylinder',
         color: 0xeeb900,
         material: { roughness: 0.3, metalness: 0.12, clearcoat: 0.42, clearcoatRoughness: 0.22 },
         position: [0.44, -0.02, 0.065],
@@ -493,10 +494,6 @@
     border.position.copy(zone.position);
     group.add(border);
 
-    const sprite = makeTextSprite(label, color);
-    sprite.position.set(rosX, 0.070, -rosY);
-    sprite.scale.set(0.07, 0.026, 1);
-    group.add(sprite);
   }
 
   function loadRobot() {
@@ -1022,7 +1019,7 @@
     });
     moveToAngles(next, immediate ? 1 : 850, {
       source: immediate ? 'init' : 'preset',
-      label: preset.label,
+      label: t(preset.label),
       emitBatch: !immediate
     });
   }
@@ -1128,15 +1125,15 @@
   }
 
   function updateMotion(now) {
-    if (!moveStart) return;
-    const t = clamp((now - moveStart) / moveDuration, 0, 1);
-    const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+   if (!moveStart) return;
+    const u = clamp((now - moveStart) / moveDuration, 0, 1);
+    const eased = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
     jointDefs.forEach((joint) => {
       const start = moveStartAngles[joint.name] ?? currentAngles[joint.name];
       const end = targetAngles[joint.name] ?? start;
       setJoint(joint.name, start + (end - start) * eased, false, { source: 'trajectory', emit: false });
     });
-    if (t >= 1) moveStart = 0;
+    if (u >= 1) moveStart = 0;
   }
 
   function updateGhostTarget(angles) {
@@ -1177,10 +1174,10 @@
     updateGhostTarget(destination);
     moveToAngles(destination, 1200, {
       source: 'plan-current',
-      label: '规划到当前姿态',
+      label: t('adv.plan'),
       emitBatch: true
     });
-    setDragStatus('已生成：Ready -> 当前姿态');
+    setDragStatus(t('sim.generatedReady'));
   }
 
   function toggleDragMode() {
@@ -1190,7 +1187,7 @@
     dragLastTime = 0;
 
     if (els.toggleDrag) {
-      els.toggleDrag.textContent = dragMode ? '退出 TCP 拖拽' : '启用 TCP 拖拽';
+      els.toggleDrag.textContent = dragMode ? t('sim.exitDrag') : t('adv.drag');
       els.toggleDrag.classList.toggle('active', dragMode);
     }
     if (els.dragMarker) {
@@ -1208,7 +1205,7 @@
       showTargetGhost(pos);
     }
     updateDragErrorLine();
-    setDragStatus(dragMode ? '拖动绿色 TCP 标记' : '未启用');
+    setDragStatus(dragMode ? t('sim.dragGreen') : t('app.dragDisabled'));
     updateDragMarker();
   }
 
@@ -1242,7 +1239,7 @@
     dragTarget.copy(boundedTarget.point);
     dragTargetClamped = boundedTarget.clamped;
     showTargetGhost(dragTarget, dragTargetClamped);
-    emitTcpTarget(dragTarget, 'drag', 'TCP 拖拽', dragTargetClamped);
+    emitTcpTarget(dragTarget, 'drag', t('sim.tcpDrag'), dragTargetClamped);
 
     const now = performance.now();
     const dt = Math.min(0.05, Math.max(0.012, (now - dragLastTime) / 1000 || 0.016));
@@ -1258,9 +1255,9 @@
     recordTeachingWaypoint(false);
     updateDragMarker();
     updateDragErrorLine();
-    if (result) {
-      setDragStatus(`${dragTargetClamped ? '边界吸附 · ' : ''}误差 ${(result.error * 1000).toFixed(1)}mm`);
-    }
+   if (result) {
+      setDragStatus(`${dragTargetClamped ? t('sim.edgeSnap') : ''}${t('sim.errorMm', { mm: (result.error * 1000).toFixed(1) })}`);
+   }
   }
 
   function endTcpDrag(event) {
@@ -1272,8 +1269,8 @@
     if (releasedTcp && releasedTcp.distanceTo(dragTarget) > DRAG_SETTLE_TARGET_ERROR) {
       dragSettling = true;
       dragSettleStart = performance.now();
-      dragSettleLastTime = dragSettleStart;
-      setDragStatus(`收敛中 ${(releasedTcp.distanceTo(dragTarget) * 1000).toFixed(1)}mm`);
+     dragSettleLastTime = dragSettleStart;
+      setDragStatus(t('sim.converging', { mm: (releasedTcp.distanceTo(dragTarget) * 1000).toFixed(1) }));
     }
     if (els.dragMarker) {
       els.dragMarker.classList.remove('dragging');
@@ -1285,8 +1282,8 @@
     if (dragSettling) return;
     dragTargetClamped = false;
     const tcp = getTcpPosition(robot);
-    if (tcp) {
-      setDragStatus(`完成 ${(tcp.distanceTo(dragTarget) * 1000).toFixed(1)}mm`);
+   if (tcp) {
+      setDragStatus(t('sim.doneMm', { mm: (tcp.distanceTo(dragTarget) * 1000).toFixed(1) }));
     }
   }
 
@@ -1321,7 +1318,7 @@
     syncGhostToRobot();
     recordTeachingWaypoint(false);
     showTargetGhost(dragTarget, dragTargetClamped);
-    emitTcpTarget(dragTarget, 'drag-settle', 'TCP 收敛', dragTargetClamped);
+    emitTcpTarget(dragTarget, 'drag-settle', t('sim.tcpConverge'), dragTargetClamped);
     updateDragErrorLine();
 
     const elapsed = now - dragSettleStart;
@@ -1330,15 +1327,15 @@
     if ((result && result.reached) || error <= DRAG_SETTLE_TARGET_ERROR) {
       dragSettling = false;
       dragTargetClamped = false;
-      updateDragErrorLine();
-      setDragStatus(`完成 ${(error * 1000).toFixed(1)}mm`);
+     updateDragErrorLine();
+      setDragStatus(t('sim.doneMm', { mm: (error * 1000).toFixed(1) }));
     } else if (elapsed >= DRAG_SETTLE_TIMEOUT_MS) {
       dragSettling = false;
       dragTargetClamped = false;
       updateDragErrorLine();
-      setDragStatus(`已尽量收敛 ${(error * 1000).toFixed(1)}mm`);
+      setDragStatus(t('sim.bestEffortMm', { mm: (error * 1000).toFixed(1) }));
     } else {
-      setDragStatus(`收敛中 ${(error * 1000).toFixed(1)}mm`);
+      setDragStatus(t('sim.converging', { mm: (error * 1000).toFixed(1) }));
     }
   }
 
@@ -1478,7 +1475,7 @@
 
   function replayTeaching() {
     if (!teachingWaypoints.length || !robot) {
-      updateTeachingStatus('没有可回放的 waypoint');
+      updateTeachingStatus(t('sim.noReplay'));
       return;
     }
     teachingRecording = false;
@@ -1491,7 +1488,7 @@
       segmentDuration: 260,
       startAngles: { ...currentAngles }
     };
-    updateTeachingStatus('正在回放示教轨迹');
+    updateTeachingStatus(t('sim.replaying'));
   }
 
   function updateTeachingPlayback(now) {
@@ -1499,25 +1496,25 @@
     const point = teachingPlayback.points[teachingPlayback.index];
     if (!point) {
       teachingPlayback = null;
-      updateTeachingStatus('回放完成');
+      updateTeachingStatus(t('sim.replayDone'));
       return;
     }
 
-    const t = clamp((now - teachingPlayback.segmentStart) / teachingPlayback.segmentDuration, 0, 1);
-    const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    const u = clamp((now - teachingPlayback.segmentStart) / teachingPlayback.segmentDuration, 0, 1);
+    const eased = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
     jointDefs.forEach((joint) => {
       const start = teachingPlayback.startAngles[joint.name] ?? currentAngles[joint.name] ?? 0;
       const end = point.joints[joint.name] ?? start;
       setJoint(joint.name, start + (end - start) * eased, false, { source: 'teach-replay' });
     });
 
-    if (t < 1) return;
+    if (u < 1) return;
 
     teachingPlayback.index += 1;
     if (teachingPlayback.index >= teachingPlayback.points.length) {
       teachingPlayback = null;
       syncGhostToRobot();
-      updateTeachingStatus('回放完成');
+      updateTeachingStatus(t('sim.replayDone'));
       return;
     }
 
@@ -1530,7 +1527,7 @@
 
   function exportTeachingWaypoints() {
     if (!teachingWaypoints.length) {
-      updateTeachingStatus('没有可导出的 waypoint');
+      updateTeachingStatus(t('sim.noExport'));
       return;
     }
     const jointNames = jointDefs.map((joint) => joint.name);
@@ -1555,9 +1552,9 @@
       els.teachExportText.select();
     }
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).catch(() => {});
+    navigator.clipboard.writeText(text).catch(() => {});
     }
-    updateTeachingStatus(`已导出 ${teachingWaypoints.length} 个 waypoint`);
+    updateTeachingStatus(t('sim.exported', { n: teachingWaypoints.length }));
   }
 
   function clearTeaching() {
@@ -1570,21 +1567,21 @@
 
   function updateTeachingStatus(message) {
     if (els.teachRecord) {
-      els.teachRecord.textContent = teachingRecording ? '停止录制' : '开始录制';
+      els.teachRecord.textContent = teachingRecording ? t('sim.stopRecord') : t('teach.record');
       els.teachRecord.classList.toggle('active', teachingRecording);
     }
     if (!els.teachStatus) return;
     if (message) {
       els.teachStatus.textContent = message;
     } else if (teachingRecording) {
-      els.teachStatus.textContent = `录制中：${teachingWaypoints.length} 个 waypoint`;
+      els.teachStatus.textContent = t('sim.recording', { n: teachingWaypoints.length });
     } else if (teachingPlayback) {
-      els.teachStatus.textContent = '正在回放示教轨迹';
+      els.teachStatus.textContent = t('sim.replaying');
     } else if (teachingWaypoints.length) {
       const duration = teachingWaypoints[teachingWaypoints.length - 1].t / 1000;
-      els.teachStatus.textContent = `已录制 ${teachingWaypoints.length} 个 waypoint，${duration.toFixed(1)} 秒`;
+      els.teachStatus.textContent = t('sim.recorded', { n: teachingWaypoints.length, sec: duration.toFixed(1) });
     } else {
-      els.teachStatus.textContent = '未录制';
+      els.teachStatus.textContent = t('teach.status');
     }
   }
 
@@ -1601,13 +1598,13 @@
     });
 
     if (!solved || !solved.angles) {
-      setDragStatus(`目标不可达：${label || '点击点'}`);
+      setDragStatus(t('sim.unreachable', { label: t(label || 'sim.clickPoint') }));
       return;
     }
 
-    emitTcpTarget(target, 'plan-target', label || '点击点', false);
+    emitTcpTarget(target, 'plan-target', t(label || 'sim.clickPoint'), false);
     moveToAngles({ ...currentAngles, ...solved.angles }, 900);
-    setDragStatus(`${label || '点击点'} -> TCP 上方 ${(solved.error * 1000).toFixed(1)}mm`);
+    setDragStatus(t('sim.planTarget', { label: t(label || 'sim.clickPoint'), mm: (solved.error * 1000).toFixed(1) }));
   }
 
   function solveIKTarget(target, maxIter, timeoutMs) {
@@ -1762,13 +1759,13 @@
     const label = document.getElementById(`${name}-value`);
     if (!label || !def) return;
     if (def.unit === 'm') {
-      const widthMm = currentAngles[name] * 1000;
-      label.textContent = `${widthMm.toFixed(0)} 毫米`;
+     const widthMm = currentAngles[name] * 1000;
+      label.textContent = t('joint.gripSuffix', { val: widthMm.toFixed(0) });
       const readout = document.getElementById('gripper-width');
-      if (readout) readout.textContent = `${widthMm.toFixed(0)} 毫米`;
+      if (readout) readout.textContent = t('joint.gripSuffix', { val: widthMm.toFixed(0) });
       return;
     }
-    label.textContent = `${(currentAngles[name] * RAD).toFixed(1)} 度`;
+    label.textContent = t('joint.degSuffix', { val: (currentAngles[name] * RAD).toFixed(1) });
   }
 
   function setGripperWidth(widthM) {
@@ -1830,7 +1827,7 @@
     const planar = Math.sqrt(ros.x * ros.x + ros.y * ros.y);
     const spatial = Math.sqrt(ros.x * ros.x + ros.y * ros.y + ros.z * ros.z);
     els.tcp.textContent = `X ${mm(ros.x)} / Y ${mm(ros.y)} / Z ${mm(ros.z)}`;
-    els.reach.textContent = `平面 ${Math.round(planar * 1000)} / 估算 ${Math.round(workspacePlanarReach * 1000)} 毫米 · 3D ${Math.round(spatial * 1000)} 毫米`;
+    els.reach.textContent = t('sim.reachText', { planar: Math.round(planar * 1000), workspace: Math.round(workspacePlanarReach * 1000), spatial: Math.round(spatial * 1000) });
     els.reach.style.color = planar <= workspacePlanarReach ? '#d7fff4' : '#ffd1c9';
   }
 
@@ -2036,7 +2033,7 @@
   }
 
   function mm(value) {
-    return `${Math.round(value * 1000)}毫米`;
+    return t('sim.mmShort', { val: Math.round(value * 1000) });
   }
 
   function animate(now) {
@@ -2158,16 +2155,16 @@
   function updateGripperMotion(now) {
     if (!gripperMotion) return;
 
-    const t = clamp((now - gripperMotion.startedAt) / gripperMotion.duration, 0, 1);
-    const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    const u = clamp((now - gripperMotion.startedAt) / gripperMotion.duration, 0, 1);
+    const eased = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
     const value = gripperMotion.start + (gripperMotion.target - gripperMotion.start) * eased;
     setJoint('gripper', value, false, {
       source: gripperMotion.source,
-      emit: gripperMotion.emit && t >= 1
+      emit: gripperMotion.emit && u >= 1
     });
     syncGhostToRobot();
 
-    if (t >= 1) gripperMotion = null;
+    if (u >= 1) gripperMotion = null;
   }
 
   window.reBotSim = {
@@ -2235,9 +2232,35 @@
     onCommand(listener) {
       if (typeof listener !== 'function') return () => {};
       commandListeners.add(listener);
-      return () => commandListeners.delete(listener);
-    }
-  };
+     return () => commandListeners.delete(listener);
+   }
+ };
+
+  if (window.rebotI18n) {
+    window.rebotI18n.onLangChange(() => {
+      Object.entries(presets).forEach(([key, preset], index) => {
+        const btn = els.presets && els.presets.children[index];
+        if (btn) btn.textContent = t(preset.label);
+      });
+      jointDefs.forEach((joint, index) => {
+        const wrap = els.joints && els.joints.children[index];
+        if (wrap) {
+          const strong = wrap.querySelector('strong');
+          if (strong) strong.textContent = t(joint.label);
+        }
+        updateJointLabel(joint.name);
+      });
+      updateTeachingStatus();
+      if (els.toggleDrag) {
+        els.toggleDrag.textContent = dragMode ? t('sim.exitDrag') : t('adv.drag');
+        els.toggleDrag.classList.toggle('active', dragMode);
+      }
+      if (!draggingTcp && !dragSettling) {
+        setDragStatus(dragMode ? t('sim.dragGreen') : t('app.dragDisabled'));
+      }
+      if (robot) updateTcpHud();
+    });
+  }
 
   function createOrbit(cam, dom, initialTarget) {
     let rotating = false;

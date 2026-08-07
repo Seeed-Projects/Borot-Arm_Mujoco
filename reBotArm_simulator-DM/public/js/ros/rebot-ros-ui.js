@@ -1,6 +1,7 @@
 (function () {
- const NS = 'rebotarm';
-  const URL_STORAGE_KEY = 'rebotarm.ros.url';
+const NS = 'rebotarm';
+ const t = window.rebotI18n ? window.rebotI18n.t : (k) => k;
+ const URL_STORAGE_KEY = 'rebotarm.ros.url';
   function loadSavedUrl() { try { return localStorage.getItem(URL_STORAGE_KEY) || ''; } catch (_) { return ''; } }
   function saveUrl(url) { try { localStorage.setItem(URL_STORAGE_KEY, url); } catch (_) {} }
  const OPEN_GRIPPER_M = 0.09;
@@ -118,8 +119,10 @@
   let heldVisionTarget = null;
   let autoVisionTargetColor = '';
   let visionSequenceBusy = false;
+  let lastVisionOp = null;
   let safeDisconnectBusy = false;
   let gravityCompensationActive = false;
+  let lastStatusState = null;
   let gravityStatusSource = 'initial';
   let gravityStatusPollInFlight = false;
 
@@ -139,9 +142,9 @@
       writeLog(detail.message || detail.state, detail.state === 'error' ? 'error' : detail.state === 'open' ? 'ok' : 'info');
     }
     updateDiagnostics();
-    if (detail.state === 'closed' || detail.state === 'error') {
-      updateGravityStatus(false, 'ROS 未连接', 'connection');
-    }
+   if (detail.state === 'closed' || detail.state === 'error') {
+      updateGravityStatus(false, t('msg.rosNotConnected'), 'connection');
+   }
     if (detail.state === 'open') {
       window.setTimeout(() => {
         runDiagnostics();
@@ -161,18 +164,18 @@
     client.autoReconnect = false;
     if (client.socket) client.socket.close();
   });
-  els.enable.addEventListener('click', () => guardedCall(() => client.enable(), '已请求使能'));
+  els.enable.addEventListener('click', () => guardedCall(() => client.enable(), t('msg.reqEnable')));
   els.disable.addEventListener('click', () => {
     cancelLowLevelPlayback();
-    guardedCall(() => client.disable(), '已请求失能', true);
+    guardedCall(() => client.disable(), t('msg.reqDisable'), true);
   });
-  els.safeHome.addEventListener('click', () => guardedCall(() => client.safeHome(), '已请求安全回零'));
+  els.safeHome.addEventListener('click', () => guardedCall(() => client.safeHome(), t('msg.reqSafeHome')));
   els.gravityStart.addEventListener('click', () => {
     cancelLowLevelPlayback();
     guardedOptionalService(
       REQUIRED_SERVICES.gravityStart,
       () => client.startGravityCompensation(),
-      '已请求启动重力补偿'
+      t('msg.reqGravityStart')
     );
   });
   els.gravityStop.addEventListener('click', () => {
@@ -180,7 +183,7 @@
     guardedOptionalService(
       REQUIRED_SERVICES.gravityStop,
       () => client.stopGravityCompensation(),
-      '已请求停止重力补偿',
+      t('msg.reqGravityStop'),
       true
     );
   });
@@ -199,7 +202,7 @@
     sidebar.classList.toggle('collapsed');
     const collapsed = sidebar.classList.contains('collapsed');
     collapseBtn.textContent = collapsed ? '▶' : '◀';
-    collapseBtn.title = collapsed ? '展开侧边栏' : '折叠侧边栏';
+    collapseBtn.title = collapsed ? t('panel.expand') : t('panel.collapse');
  });
  if (els.visionColor) els.visionColor.addEventListener('change', () => {
     if (els.visionColor.value === 'auto') autoVisionTargetColor = '';
@@ -212,17 +215,17 @@
   if (els.stopPath) {
     els.stopPath.addEventListener('click', () => {
       cancelLowLevelPlayback();
-      writeLog('已请求停止低层回放', 'warn');
+      writeLog(t('log.stopPlayback'), 'warn');
     });
   }
 
   els.control.addEventListener('change', () => {
-    if (els.control.checked) writeLog('控制锁已打开', 'info');
+    if (els.control.checked) writeLog(t('log.controlLockOpen'), 'info');
   });
 
   waitForSimApi((sim) => sim.onCommand((command) => forwardSimCommand(command)));
 
-  setStatus('closed', 'ROS 未连接');
+  setStatus('closed', t('msg.rosNotConnected'));
   updateDiagnostics();
   window.setInterval(updateDiagnostics, 1000);
   window.setInterval(pollGravityCompensationStatus, 500);
@@ -300,23 +303,23 @@
     if (!visionSequenceBusy && typeof msg.position === 'number' && simTargetAngles.has('gripper')) {
       const target = simTargetAngles.get('gripper');
       const err = Math.abs(target - msg.position);
-      if (err < 0.003) {
-        setMessage(`夹爪已到位：ROS反馈 ${Math.round(msg.position * 1000)} 毫米`);
-      } else {
-        setMessage(`夹爪运动中：指令 ${Math.round(target * 1000)} 毫米 / ROS反馈 ${Math.round(msg.position * 1000)} 毫米`);
-      }
+     if (err < 0.003) {
+        setMessage(t('msg.gripperArrived', {mm: Math.round(msg.position * 1000)}));
+     } else {
+        setMessage(t('msg.gripperMoving', {cmd: Math.round(target * 1000), mm: Math.round(msg.position * 1000)}));
+     }
     }
     updateDiagnostics();
   }
 
   function handleArmStatus(msg) {
-    const enabled = msg.enabled ? '已使能' : '已失能';
+    const enabled = msg.enabled ? t('st.enabled') : t('st.disabled');
     const mode = msg.mode || 'unknown';
-    const machine = msg.state_machine || 'unknown';
-    const errors = Array.isArray(msg.error_codes) && msg.error_codes.length ? `，错误 ${msg.error_codes.join(', ')}` : '';
-    if (!visionSequenceBusy) {
-      setMessage(`${enabled}，模式 ${mode}，状态 ${machine}${errors}`);
-    }
+   const machine = msg.state_machine || 'unknown';
+    const errors = Array.isArray(msg.error_codes) && msg.error_codes.length ? t('fb.errors', {codes: msg.error_codes.join(', ')}) : '';
+   if (!visionSequenceBusy) {
+      setMessage(t('fb.armStatus', {enabled, mode, machine, errors}));
+   }
     updateGravityStatus(machine === 'GRAVITY_COMP', machine, 'arm');
     updateDiagnostics();
   }
@@ -336,7 +339,7 @@
 
     if (els.mirror.checked && !els.control.checked && command.source === 'slider') {
       els.mirror.checked = false;
-      writeLog('已暂停 ROS 镜像，避免旧反馈把滑块拉回', 'warn');
+      writeLog(t('log.mirrorPaused'), 'warn');
     }
 
     if (!controlAllowed(false)) return;
@@ -347,9 +350,9 @@
     lastSent.set(command.name, now);
 
     if (command.name === 'gripper') {
-      client.publishGripperCommand(command.value);
-      writeLog(`夹爪指令 ${(command.value * 1000).toFixed(0)} 毫米`, 'info');
-      return;
+     client.publishGripperCommand(command.value);
+      writeLog(t('log.gripperCmdShort', {mm: (command.value * 1000).toFixed(0)}), 'info');
+     return;
     }
     client.publishJointCommand(command.name, command.value, { vlim: getVlim() });
   }
@@ -385,9 +388,9 @@
       } else {
         client.publishJointCommand(name, joints[name], { vlim: getVlim() });
       }
-    });
-    writeLog(`${command.label || command.source || '批量目标'} -> ROS ${names.length} 轴`, 'ok');
-  }
+   });
+    writeLog(t('log.jointBatch', {label: command.label || command.source || t('log.batchDefault'), n: names.length}), 'ok');
+ }
 
   async function checkIk() {
     if (!controlAllowed(true)) return;
@@ -395,9 +398,9 @@
     const duration = getPoseDuration();
     client.publishTargetPose(pose);
     await guardedCall(
-      () => client.moveToPose(pose, duration),
-      `已请求 IK 平滑运动（${duration.toFixed(1)} 秒）`,
-      true
+     () => client.moveToPose(pose, duration),
+      t('msg.reqIkMove', {sec: duration.toFixed(1)}),
+     true
     );
   }
 
@@ -405,7 +408,7 @@
     const result = await guardedOptionalService(
       REQUIRED_SERVICES.gravityStatus,
       () => client.gravityCompensationStatus(),
-      '已请求查询重力补偿',
+      t('msg.reqGravityQuery'),
       true,
       options
     );
@@ -430,7 +433,7 @@
   async function runDiagnostics() {
     updateDiagnostics();
     if (!client.connected) {
-      writeLog('rosbridge 离线，请先连接', 'warn');
+      writeLog(t('log.rosOfflineFirst'), 'warn');
       return;
     }
     try {
@@ -453,18 +456,18 @@
         'ok'
       );
       if (els.visionStatus && !topicList.includes(REQUIRED_TOPICS.visionDetections)) {
-        els.visionStatus.textContent = '等待节点';
+        els.visionStatus.textContent = t('st.waitNode');
       }
       if (!listedServices.has(REQUIRED_SERVICES.gravityStatus)) {
-        updateGravityStatus(false, '服务不可用');
+        updateGravityStatus(false, t('st.serviceUnavailable'));
       }
-      if (hasSimulationTopics) markSimulationDriverDetected('rosapi 仿真话题');
+      if (hasSimulationTopics) markSimulationDriverDetected(t('reason.rosapiSim'));
       if (!hasActionServer(`/${NS}/follow_joint_trajectory`)) {
-        writeLog('未发现轨迹动作接口，轨迹按钮将使用低层回放', 'info');
+        writeLog(t('log.lowLevelFallbackInfo'), 'info');
       }
-    } catch (error) {
-      writeLog(`rosapi 不可用，改用实时话题时间判断（${error.message || error}）`, 'warn');
-    }
+   } catch (error) {
+      writeLog(t('log.rosapiFallback', {err: error.message || error}), 'warn');
+   }
   }
 
   function buildTrajectoryPoints(waypoints, totalDuration) {
@@ -482,14 +485,14 @@
 
   async function sendTrajectory(points, optimisticMessage) {
     if (!points.length) return;
-    if (shouldUseLowLevelTrajectory()) {
-      setMessage(`${optimisticMessage}（仿真低层回放）`);
-      writeLog(`${optimisticMessage}；低层回放`, 'info');
-      await replayTrajectoryLowLevel(points);
+   if (shouldUseLowLevelTrajectory()) {
+      setMessage(t('msg.simLowLevelSuffix', {label: optimisticMessage}));
+      writeLog(t('log.lowLevelSuffix', {label: optimisticMessage}), 'info');
+     await replayTrajectoryLowLevel(points);
       return;
     }
     if (!hasActionServer(`/${NS}/follow_joint_trajectory`)) {
-      writeLog('未发现 FollowJointTrajectory 动作，改用低层回放', 'warn');
+      writeLog(t('log.lowLevelFallbackWarn'), 'warn');
       await replayTrajectoryLowLevel(points);
       return;
     }
@@ -500,9 +503,9 @@
     cancelLowLevelPlayback();
     const playback = { cancelled: false };
     lowLevelPlayback = playback;
-    const started = performance.now();
-    writeLog(`低层回放开始（${points.length} 个点）`, 'ok');
-    for (const point of points) {
+   const started = performance.now();
+    writeLog(t('log.lowLevelStart', {n: points.length}), 'ok');
+   for (const point of points) {
       if (playback.cancelled || !controlAllowed(false)) break;
       const targetMs = rosTimeToSeconds(point.time_from_start) * 1000;
       const waitMs = Math.max(0, targetMs - (performance.now() - started));
@@ -517,7 +520,7 @@
       syncSimArmFromTrajectoryPoint(point);
     }
     if (lowLevelPlayback === playback) lowLevelPlayback = null;
-    writeLog(playback.cancelled ? '低层回放已取消' : '低层回放完成', playback.cancelled ? 'warn' : 'ok');
+    writeLog(playback.cancelled ? t('log.lowLevelCancelled') : t('log.lowLevelDone'), playback.cancelled ? 'warn' : 'ok');
   }
 
   function syncSimArmFromTrajectoryPoint(point) {
@@ -545,9 +548,9 @@
 
   function markSimulationDriverDetected(reason) {
     if (simulationDriverDetected) return;
-    simulationDriverDetected = true;
-    writeLog(`已检测到仿真驱动（${reason}），轨迹按钮将使用低层回放`, 'info');
-  }
+   simulationDriverDetected = true;
+    writeLog(t('log.simDriverDetected', {reason}), 'info');
+ }
 
   function hasActionServer(actionName) {
     return listedActionServers.has(actionName);
@@ -586,11 +589,11 @@
 
   function controlAllowed(interactive) {
     if (!client.connected) {
-      if (interactive) setStatus('closed', 'ROS 未连接');
+      if (interactive) setStatus('closed', t('msg.rosNotConnected'));
       return false;
     }
     if (!els.control.checked) {
-      if (interactive) setMessage('控制锁未打开，网页只更新仿真，不会控制 ROS。');
+      if (interactive) setMessage(t('msg.controlLockClosed'));
       return false;
     }
     return true;
@@ -598,7 +601,7 @@
 
   function canConnectWebSocketUrl(url) {
     if (window.location.protocol === 'https:' && /^ws:\/\//i.test(url)) {
-      const message = '当前页面是 HTTPS，浏览器会拦截 ws:// 连接。请用 http://localhost:3001 打开页面后继续填写这个 IP 地址。';
+      const message = t('msg.httpsWsBlocked');
       setStatus('error', message);
       writeLog(message, 'error');
       return false;
@@ -607,9 +610,9 @@
   }
 
   async function guardedOptionalService(serviceName, call, optimisticMessage, allowWithoutControl, options) {
-    if (listedServices.size && !listedServices.has(serviceName)) {
-      const message = `ROS 已连接，但未发现服务 ${serviceName}`;
-      updateGravityStatus(false, '服务不可用');
+   if (listedServices.size && !listedServices.has(serviceName)) {
+      const message = t('msg.serviceNotFound', {name: serviceName});
+     updateGravityStatus(false, t('st.serviceUnavailable'));
       setMessage(message);
       if (!(options && (options.auto || options.silent))) writeLog(message, 'warn');
       return null;
@@ -632,25 +635,25 @@
     safeDisconnectBusy = true;
     els.disconnect.disabled = true;
     try {
-      setMessage('断开防护：正在安全回零…');
-      writeLog('断开防护：开始安全回零', 'info');
+      setMessage(t('msg.disconnectHome'));
+      writeLog(t('log.disconnectHomeStart'), 'info');
       const homeResult = await client.safeHome();
       if (homeResult && homeResult.success === false) {
-        throw new Error(homeResult.message || '安全回零失败');
+        throw new Error(homeResult.message || t('msg.safeHomeFail'));
       }
-      writeLog('断开防护：安全回零完成', 'ok');
+      writeLog(t('log.disconnectHomeDone'), 'ok');
 
-      setMessage('断开防护：正在失能…');
-      writeLog('断开防护：开始失能', 'info');
+      setMessage(t('msg.disconnectDisable'));
+      writeLog(t('log.disconnectDisableStart'), 'info');
       const disableResult = await client.disable();
       if (disableResult && disableResult.success === false) {
-        throw new Error(disableResult.message || '失能失败');
+        throw new Error(disableResult.message || t('msg.disableFail'));
       }
-      writeLog('断开防护：失能完成，正在断开 ROS', 'ok');
+      writeLog(t('log.disconnectDisableDone'), 'ok');
       client.disconnect();
-    } catch (error) {
-      const message = `断开防护失败，ROS 保持连接：${error && error.message ? error.message : error}`;
-      setMessage(message);
+   } catch (error) {
+      const message = t('msg.disconnectGuardFail', {err: error && error.message ? error.message : error});
+     setMessage(message);
       writeLog(message, 'error');
     } finally {
       safeDisconnectBusy = false;
@@ -660,11 +663,11 @@
 
   async function guardedCall(call, optimisticMessage, allowWithoutControl, options) {
     if (!client.connected) {
-      setStatus('closed', 'ROS 未连接');
+      setStatus('closed', t('msg.rosNotConnected'));
       return null;
     }
     if (!allowWithoutControl && !controlAllowed(false)) {
-      setMessage('控制锁未打开，网页只更新仿真，不会控制 ROS。');
+      setMessage(t('msg.controlLockClosed'));
       return null;
     }
     try {
@@ -680,7 +683,7 @@
       }
       return result;
     } catch (error) {
-      const message = error && error.message ? error.message : 'ROS 调用失败';
+      const message = error && error.message ? error.message : t('log.rosCallFail');
       if (options && options.silent) return null;
       if (options && options.keepConnectionStatus && client.connected) {
         setMessage(message);
@@ -693,13 +696,13 @@
   }
 
   function formatServiceResult(result) {
-    if (!result) return 'ROS 调用完成';
-    if (typeof result.accepted === 'boolean') return result.accepted ? '动作目标已接受' : '动作目标被拒绝';
-    if (typeof result.message === 'string' && result.message) return result.message;
-    if (typeof result.reached_position === 'number') return `夹爪到达 ${Math.round(result.reached_position * 1000)} 毫米`;
-    if (Array.isArray(result.q_solution)) return `IK ${result.success ? '成功' : '失败'}：[${result.q_solution.map((v) => Number(v).toFixed(3)).join(', ')}]`;
-    if (typeof result.success === 'boolean') return result.success ? 'ROS 调用成功' : 'ROS 调用失败';
-    return 'ROS 调用完成';
+    if (!result) return t('log.rosCallDone');
+    if (typeof result.accepted === 'boolean') return result.accepted ? t('msg.goalAccepted') : t('msg.goalRejected');
+   if (typeof result.message === 'string' && result.message) return result.message;
+    if (typeof result.reached_position === 'number') return t('msg.gripperReached', {mm: Math.round(result.reached_position * 1000)});
+    if (Array.isArray(result.q_solution)) return t('log.ikResult', {result: result.success ? t('log.ikSuccess') : t('log.ikFail'), q: result.q_solution.map((v) => Number(v).toFixed(3)).join(', ')});
+   if (typeof result.success === 'boolean') return result.success ? t('log.rosCallSuccess') : t('log.rosCallFail');
+    return t('log.rosCallDone');
   }
 
   function updateDiagnostics() {
@@ -713,7 +716,7 @@
       return;
     }
     if (!last) {
-      markDiag(el, null, listedTopics.has(topic) ? (topic === REQUIRED_TOPICS.armStatus ? '已发现' : '已发现 / 等待') : '等待');
+      markDiag(el, null, listedTopics.has(topic) ? (topic === REQUIRED_TOPICS.armStatus ? t('st.diagFound') : t('st.diagFoundWait')) : t('st.diagWait'));
       return;
     }
     const age = (Date.now() - last) / 1000;
@@ -741,18 +744,18 @@
   }
 
   function handleCameraImage(msg) {
-    markSimulationDriverDetected('MuJoCo 相机反馈');
+    markSimulationDriverDetected(t('reason.mujocoCamera'));
     if (!els.cameraCanvas || !msg) return;
     const width = Number(msg.width) || 0;
     const height = Number(msg.height) || 0;
     if (width <= 0 || height <= 0) {
-      setCameraStatus('错误', 'error');
+      setCameraStatus(t('st.cameraError'), 'error');
       return;
     }
 
     const bytes = rosImageBytes(msg.data);
     if (!bytes) {
-      setCameraStatus('数据异常', 'error');
+      setCameraStatus(t('st.cameraDataError'), 'error');
       return;
     }
 
@@ -760,7 +763,7 @@
     const channels = encoding === 'rgba8' || encoding === 'bgra8' ? 4 : 3;
     const supported = encoding === 'rgb8' || encoding === 'bgr8' || encoding === 'rgba8' || encoding === 'bgra8';
     if (!supported) {
-      setCameraStatus(encoding || '不支持', 'warn');
+      setCameraStatus(encoding || t('st.encodingUnsupported'), 'warn');
       return;
     }
 
@@ -810,12 +813,12 @@
   function updateCameraStatusFromTopic() {
     if (!els.cameraStatus) return;
     if (!client.connected) {
-      setCameraStatus('离线', 'error');
+      setCameraStatus(t('st.cameraOffline'), 'error');
       return;
     }
     const last = client.getLastMessageAt(REQUIRED_TOPICS.cameraImage);
     if (!last) {
-      setCameraStatus(listedTopics.has(REQUIRED_TOPICS.cameraImage) ? '等待画面' : '等待话题', 'warn');
+      setCameraStatus(listedTopics.has(REQUIRED_TOPICS.cameraImage) ? t('st.cameraWaitFrame') : t('st.cameraWaitTopic'), 'warn');
       return;
     }
     const age = (Date.now() - last) / 1000;
@@ -833,22 +836,22 @@
   }
 
   function handleVisionDetections(msg) {
-    markSimulationDriverDetected('仿真视觉反馈');
+    markSimulationDriverDetected(t('reason.simVision'));
     if (!els.visionStatus && !els.visionTarget) return;
     let payload = null;
     try {
       payload = JSON.parse(msg && msg.data ? msg.data : '{}');
     } catch (error) {
-      if (els.visionStatus) els.visionStatus.textContent = '数据异常';
+      if (els.visionStatus) els.visionStatus.textContent = t('st.cameraDataError');
       return;
     }
 
     latestVisionPayload = payload;
     latestVisionAt = performance.now();
     const count = Number(payload.count) || 0;
-    if (els.visionStatus) {
-      els.visionStatus.textContent = count ? `${count} 个 / 目标 ${payload.target_color || '--'}` : '未发现';
-    }
+   if (els.visionStatus) {
+      els.visionStatus.textContent = count ? t('fb.visionCount', {count, color: payload.target_color || '--'}) : t('st.visionNone');
+   }
     updateSelectedVisionTarget();
   }
 
@@ -859,7 +862,7 @@
     } catch (error) {
       return;
     }
-    markSimulationDriverDetected('MuJoCo 物体状态反馈');
+    markSimulationDriverDetected(t('reason.mujocoObject'));
     if (window.reBotSim && typeof window.reBotSim.syncMujocoObjectStates === 'function') {
       window.reBotSim.syncMujocoObjectStates(payload.objects || []);
     }
@@ -870,7 +873,7 @@
     try {
       payload = JSON.parse(msg && msg.data ? msg.data : '{}');
     } catch (error) {
-      writeLog('MCP 动画事件解析失败', 'warn');
+      writeLog(t('log.mcpAnimParseFail'), 'warn');
       return;
     }
 
@@ -901,9 +904,9 @@
       return;
     }
     const approachZ = getVisionApproachZ(target);
-    const graspPlan = estimateVisionGraspPlan(target);
-    els.visionTarget.textContent = `${target.color} x ${Number(target.x).toFixed(3)} y ${Number(target.y).toFixed(3)} z ${approachZ.toFixed(3)} / 夹紧 ${Math.round(graspPlan.physicalGap * 1000)}mm / yaw ${Math.round(graspPlan.yawRad * 180 / Math.PI)}deg`;
-  }
+   const graspPlan = estimateVisionGraspPlan(target);
+    els.visionTarget.textContent = t('fb.visionTarget', {color: target.color, x: Number(target.x).toFixed(3), y: Number(target.y).toFixed(3), z: approachZ.toFixed(3), mm: Math.round(graspPlan.physicalGap * 1000), yaw: Math.round(graspPlan.yawRad * 180 / Math.PI)});
+ }
 
   function chooseRandomVisionTarget() {
     const detections = latestVisionPayload && Array.isArray(latestVisionPayload.detections)
@@ -983,8 +986,8 @@
     if (!pose) return;
     writePoseInputs(pose);
     if (client.connected) client.publishTargetPose(pose);
-    setMessage('已把视觉目标填入 Pose 输入框');
-    writeLog('视觉目标 -> Pose 输入框', 'ok');
+    setMessage(t('msg.visionFillDone'));
+    writeLog(t('log.visionFill'), 'ok');
   }
 
   async function moveAboveVisionTarget() {
@@ -997,9 +1000,9 @@
     if (!pose) return;
     if (mode === 'auto') {
       selectedVisionTarget = target;
-      renderVisionTarget(target);
-      writeLog(`自动目标随机选择：${target.color}`, 'info');
-    }
+     renderVisionTarget(target);
+      writeLog(t('log.autoTarget', {color: target.color}), 'info');
+   }
     const previousTarget = lastVisionTarget && !sameVisionTarget(lastVisionTarget, target)
       ? lastVisionTarget
       : null;
@@ -1009,11 +1012,11 @@
       const route = buildVisionTransitRoute(previousTarget, target);
       for (const waypoint of route) {
         await runVisionMoveStep(waypoint.pose, Math.max(1.1, duration * 0.60), waypoint.label);
-      }
-      await runVisionMoveStep(pose, duration, `移动到 ${target.color} 目标上方`);
-      lastVisionTarget = cloneVisionTarget(target);
+     }
+      await runVisionMoveStep(pose, duration, t('msg.moveAboveTarget', {color: target.color}));
+     lastVisionTarget = cloneVisionTarget(target);
     } catch (error) {
-      const message = error && error.message ? error.message : '视觉移动流程中止';
+      const message = error && error.message ? error.message : t('msg.visionMoveAbort');
       setMessage(message);
       writeLog(message, 'warn');
     } finally {
@@ -1030,12 +1033,12 @@
       target = chooseRandomVisionTarget() || target;
       if (target) {
         selectedVisionTarget = target;
-        renderVisionTarget(target);
-        writeLog(`自动目标随机选择：${target.color}`, 'info');
-      }
+       renderVisionTarget(target);
+        writeLog(t('log.autoTarget', {color: target.color}), 'info');
+     }
     }
     if (!target) {
-      setMessage('没有可用的视觉目标。');
+      setMessage(t('msg.noVisionTarget'));
       return;
     }
 
@@ -1043,18 +1046,18 @@
       ? lastVisionTarget
       : null;
     let plan = buildVisionPickPlan(target);
-    if (!plan) return;
-    writeLog(
-      `视觉抓取姿态：${target.color} 夹持宽度 ${Math.round(plan.graspPlan.physicalGap * 1000)}mm，yaw ${Math.round(plan.graspPlan.yawRad * 180 / Math.PI)}deg，抬升 z=${plan.firstLiftPose.position.z.toFixed(3)}，中转 z=${plan.transitPose.position.z.toFixed(3)}`,
-      'info'
+   if (!plan) return;
+   writeLog(
+      t('log.visionGraspPose', {color: target.color, mm: Math.round(plan.graspPlan.physicalGap * 1000), yaw: Math.round(plan.graspPlan.yawRad * 180 / Math.PI), lift: plan.firstLiftPose.position.z.toFixed(3), transit: plan.transitPose.position.z.toFixed(3)}),
+     'info'
     );
 
     const duration = getPoseDuration();
     let lastPose = null;
     const runIfNeeded = async (pose, moveDuration, label) => {
-      if (lastPose && poseDistance(lastPose, pose) < VISION_POSE_SKIP_M) {
-        writeLog(`${label}：已在目标附近，跳过重复移动`, 'info');
-        return { success: true, skipped: true };
+     if (lastPose && poseDistance(lastPose, pose) < VISION_POSE_SKIP_M) {
+        writeLog(t('log.visionSkipMove', {label}), 'info');
+       return { success: true, skipped: true };
       }
       const result = await runVisionMoveStep(pose, moveDuration, label);
       lastPose = pose;
@@ -1064,7 +1067,7 @@
     setVisionBusy(true, 'pick');
     try {
       releaseSimCarriedObject();
-      await commandGripperAndWait(OPEN_GRIPPER_M, '视觉抓取：夹爪完全打开', {
+      await commandGripperAndWait(OPEN_GRIPPER_M, t('msg.pickOpenGripper'), {
         timeoutMs: 2600,
         minWaitMs: 850,
         tolerance: 0.006,
@@ -1081,28 +1084,28 @@
       if (refinedTarget && visionTargetShifted(refinedTarget, target, 0.008)) {
         target = refinedTarget;
         plan = buildVisionPickPlan(target);
-        if (!plan) return;
-        writeLog(`视觉二次定位：${target.color} 位置已更新`, 'info');
-        writeLog(
-          `视觉抓取姿态：${target.color} 夹持宽度 ${Math.round(plan.graspPlan.physicalGap * 1000)}mm，yaw ${Math.round(plan.graspPlan.yawRad * 180 / Math.PI)}deg，抬升 z=${plan.firstLiftPose.position.z.toFixed(3)}，中转 z=${plan.transitPose.position.z.toFixed(3)}`,
-          'info'
+       if (!plan) return;
+        writeLog(t('log.visionRelocate', {color: target.color}), 'info');
+       writeLog(
+          t('log.visionGraspPose', {color: target.color, mm: Math.round(plan.graspPlan.physicalGap * 1000), yaw: Math.round(plan.graspPlan.yawRad * 180 / Math.PI), lift: plan.firstLiftPose.position.z.toFixed(3), transit: plan.transitPose.position.z.toFixed(3)}),
+         'info'
         );
       }
 
-      writePoseInputs(plan.approachPose);
-      await runIfNeeded(plan.approachPose, duration, `视觉抓取：移动到 ${target.color} 上方`);
+     writePoseInputs(plan.approachPose);
+      await runIfNeeded(plan.approachPose, duration, t('msg.pickMoveAbove', {color: target.color}));
 
-      const alignDuration = Math.max(1.0, duration * 0.55);
-      await runIfNeeded(plan.verticalAlignPose, alignDuration, `视觉抓取：垂直对正 ${target.color}`);
+     const alignDuration = Math.max(1.0, duration * 0.55);
+      await runIfNeeded(plan.verticalAlignPose, alignDuration, t('msg.pickAlign', {color: target.color}));
 
-      const pregraspDuration = Math.max(0.85, duration * 0.45);
-      await runIfNeeded(plan.pregraspPose, pregraspDuration, `视觉抓取：垂直预下探 ${target.color}`);
+     const pregraspDuration = Math.max(0.85, duration * 0.45);
+      await runIfNeeded(plan.pregraspPose, pregraspDuration, t('msg.pickPreDescend', {color: target.color}));
 
-      const descendDuration = Math.max(1.1, duration * 0.65);
-      await runIfNeeded(plan.graspPose, descendDuration, `视觉抓取：下探 ${target.color}`);
+     const descendDuration = Math.max(1.1, duration * 0.65);
+      await runIfNeeded(plan.graspPose, descendDuration, t('msg.pickDescend', {color: target.color}));
 
-      await commandGripperAndWait(plan.graspPlan.command, `视觉抓取：夹紧 ${target.color}`, {
-        timeoutMs: 2100,
+      await commandGripperAndWait(plan.graspPlan.command, t('msg.pickSqueeze', {color: target.color}), {
+       timeoutMs: 2100,
         minWaitMs: 850,
         tolerance: 0.006,
         allowContactStop: true,
@@ -1111,26 +1114,26 @@
       attachSimCarriedObject(target);
 
       const firstLiftDuration = Math.max(1.25, duration * 0.75);
-      if (String(target.color || '') === 'blue') {
-        await runVisionMoveStep(plan.firstLiftPose, firstLiftDuration, `视觉抓取：蓝色强制离桌抬起 z=${plan.firstLiftPose.position.z.toFixed(3)}`);
-        lastPose = plan.firstLiftPose;
-        await runVisionMoveStep(plan.transitPose, Math.max(1.45, duration * 0.70), `视觉抓取：蓝色强制高位中转 z=${plan.transitPose.position.z.toFixed(3)}`);
-        lastPose = plan.transitPose;
-      } else {
-        await runIfNeeded(plan.firstLiftPose, firstLiftDuration, `视觉抓取：离桌抬起 ${target.color}`);
+     if (String(target.color || '') === 'blue') {
+        await runVisionMoveStep(plan.firstLiftPose, firstLiftDuration, t('msg.pickBlueLift', {z: plan.firstLiftPose.position.z.toFixed(3)}));
+       lastPose = plan.firstLiftPose;
+        await runVisionMoveStep(plan.transitPose, Math.max(1.45, duration * 0.70), t('msg.pickBlueTransit', {z: plan.transitPose.position.z.toFixed(3)}));
+       lastPose = plan.transitPose;
+     } else {
+        await runIfNeeded(plan.firstLiftPose, firstLiftDuration, t('msg.pickLift', {color: target.color}));
       }
 
-      const liftDuration = Math.max(1.8, duration * 0.85);
-      await runIfNeeded(plan.approachPose, liftDuration, `视觉抓取：抬高 ${target.color}`);
+     const liftDuration = Math.max(1.8, duration * 0.85);
+      await runIfNeeded(plan.approachPose, liftDuration, t('msg.pickRaise', {color: target.color}));
 
-      const finalTransitDuration = Math.max(1.1, duration * 0.60);
-      await runIfNeeded(plan.transitPose, finalTransitDuration, `视觉抓取：安全中转 ${target.color}`);
+     const finalTransitDuration = Math.max(1.1, duration * 0.60);
+      await runIfNeeded(plan.transitPose, finalTransitDuration, t('msg.pickTransit', {color: target.color}));
 
-      lastVisionTarget = cloneVisionTarget(target);
-      setMessage(`视觉抓取演示完成，按短边夹紧到 ${Math.round(plan.graspPlan.physicalGap * 1000)} 毫米`);
-      writeLog(`视觉抓取演示完成，夹爪指令 ${Math.round(plan.graspPlan.command * 1000)} 毫米`, 'ok');
-    } catch (error) {
-      const message = error && error.message ? error.message : '视觉抓取流程中止';
+     lastVisionTarget = cloneVisionTarget(target);
+      setMessage(t('msg.graspDemoDone', {mm: Math.round(plan.graspPlan.physicalGap * 1000)}));
+      writeLog(t('log.graspDone', {mm: Math.round(plan.graspPlan.command * 1000)}), 'ok');
+   } catch (error) {
+      const message = error && error.message ? error.message : t('msg.visionPickAbort');
       setMessage(message);
       writeLog(message, 'warn');
     } finally {
@@ -1150,8 +1153,8 @@
         ? lastVisionTarget
         : null);
     if (!target) {
-      setMessage('当前没有已夹持的视觉物体，请先执行视觉抓取。');
-      writeLog('放下物体已忽略：当前没有已夹持目标', 'warn');
+      setMessage(t('msg.noHeldObject'));
+      writeLog(t('log.placeIgnored'), 'warn');
       return;
     }
 
@@ -1161,17 +1164,17 @@
     setVisionBusy(true, 'place');
     try {
       await runVisionMoveStep(
-        plan.approachPose,
-        Math.max(1.1, duration * 0.65),
-        `视觉放置：移动到 ${target.color} 放置点上方`
-      );
+       plan.approachPose,
+       Math.max(1.1, duration * 0.65),
+        t('msg.placeMoveAbove', {color: target.color})
+     );
       await runVisionMoveStep(
-        plan.graspPose,
-        Math.max(1.1, duration * 0.65),
-        `视觉放置：垂直下探 ${target.color}`
-      );
-      await commandGripperAndWait(OPEN_GRIPPER_M, `视觉放置：打开夹爪释放 ${target.color}`, {
-        timeoutMs: 2600,
+       plan.graspPose,
+       Math.max(1.1, duration * 0.65),
+        t('msg.placeDescend', {color: target.color})
+     );
+      await commandGripperAndWait(OPEN_GRIPPER_M, t('msg.placeOpen', {color: target.color}), {
+       timeoutMs: 2600,
         minWaitMs: 850,
         tolerance: 0.006,
         requireReached: true,
@@ -1179,15 +1182,15 @@
       });
       releaseSimCarriedObject();
       await runVisionMoveStep(
-        plan.approachPose,
-        Math.max(1.5, duration * 0.8),
-        `视觉放置：释放后抬升 ${target.color}`
-      );
-      lastVisionTarget = cloneVisionTarget(target);
-      setMessage(`视觉放置完成：${target.color} 已释放，机械臂已抬升`);
-      writeLog(`视觉放置完成：${target.color} 已释放并抬升`, 'ok');
-    } catch (error) {
-      const message = error && error.message ? error.message : '视觉放置流程中止';
+       plan.approachPose,
+       Math.max(1.5, duration * 0.8),
+        t('msg.placeLift', {color: target.color})
+     );
+     lastVisionTarget = cloneVisionTarget(target);
+      setMessage(t('msg.placeDone', {color: target.color}));
+      writeLog(t('log.placeDoneLog', {color: target.color}), 'ok');
+   } catch (error) {
+      const message = error && error.message ? error.message : t('msg.visionPlaceAbort');
       setMessage(message);
       writeLog(message, 'warn');
     } finally {
@@ -1199,9 +1202,9 @@
     writePoseInputs(pose);
     client.publishTargetPose(pose);
     const result = await sendVisionMoveGoal(pose, duration, label);
-    if (!movementSucceeded(result)) {
-      throw new Error(`${label}失败，已停止后续动作`);
-    }
+   if (!movementSucceeded(result)) {
+      throw new Error(t('msg.stepFailed', {label}));
+   }
     if (!(result && result.localPlayback)) {
       await sleep(duration * 1000 + 300);
     }
@@ -1255,15 +1258,15 @@
     if (previousTarget) {
       appendVisionRoutePose(
         route,
-        poseFromVisionTarget(getVisionTransitZ(previousTarget), previousTarget),
-        `视觉避让：先抬离 ${previousTarget.color}`
-      );
+       poseFromVisionTarget(getVisionTransitZ(previousTarget), previousTarget),
+        t('msg.avoidLift', {color: previousTarget.color})
+     );
     }
     appendVisionRoutePose(
       route,
-      poseFromVisionTarget(getVisionTransitZ(target), target),
-      `视觉避让：高位移动到 ${target.color}`
-    );
+     poseFromVisionTarget(getVisionTransitZ(target), target),
+      t('msg.avoidMove', {color: target.color})
+   );
     return route;
   }
 
@@ -1290,14 +1293,14 @@
   function poseFromVisionTarget(zOverride, targetOverride) {
     const target = targetOverride || selectedVisionTarget || chooseVisionTarget();
     if (!target) {
-      setMessage('没有可用的视觉目标。');
+      setMessage(t('msg.noVisionTarget'));
       return null;
     }
     const x = Number(target.x);
     const y = Number(target.y);
     const z = Number(zOverride);
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-      setMessage('视觉目标坐标异常。');
+      setMessage(t('msg.visionCoordError'));
       return null;
     }
     selectedVisionTarget = target;
@@ -1322,41 +1325,41 @@
       writeLog(message, result && result.accepted === false ? 'warn' : 'ok');
       return { ...(result || {}), localPlayback: false };
     } catch (error) {
-      const message = error && error.message ? error.message : '视觉目标动作下发失败';
+      const message = error && error.message ? error.message : t('msg.visionMoveFail');
       setStatus('error', message);
       writeLog(message, 'error');
       return { success: false, localPlayback: false };
     }
   }
 
-  async function moveToPoseViaIkTrajectory(pose, duration, optimisticMessage) {
-    setMessage(`${optimisticMessage}：IK 解算中`);
-    writeLog(`${optimisticMessage}：IK 解算中`, 'info');
-    const ik = await guardedCall(
-      () => client.solveMoveToPoseIK(pose),
-      `${optimisticMessage}：IK 解算中`,
-      true,
+ async function moveToPoseViaIkTrajectory(pose, duration, optimisticMessage) {
+    setMessage(t('msg.ikSolving', {label: optimisticMessage}));
+    writeLog(t('msg.ikSolving', {label: optimisticMessage}), 'info');
+   const ik = await guardedCall(
+     () => client.solveMoveToPoseIK(pose),
+      t('msg.ikSolving', {label: optimisticMessage}),
+     true,
       { keepConnectionStatus: true }
     );
     if (!ik || !Array.isArray(ik.q_solution) || !ik.q_solution.length) {
-      setMessage('IK 没有返回可用关节解。');
+      setMessage(t('msg.ikNoSolution'));
       return { success: false, localPlayback: true };
     }
     const ikBestEffort = ik.success === false;
-    if (ikBestEffort) {
-      const message = ik.message || 'IK 未完全收敛，但返回了可用近似解。';
-      setMessage(`${message}，继续执行近似解。`);
-      writeLog(`${message}，继续执行近似解。`, 'warn');
-    }
+   if (ikBestEffort) {
+     const message = ik.message || t('msg.ikApproxFallback');
+      setMessage(t('msg.ikApprox', {message}));
+      writeLog(t('msg.ikApprox', {message}), 'warn');
+   }
 
     const start = getCurrentRosPositions();
     const goal = JOINT_NAMES.map((name, index) => {
       const value = Number(ik.q_solution[index]);
       return Number.isFinite(value) ? value : start[index];
     });
-    const points = buildSmoothJointMovePoints(start, goal, duration);
-    await sendTrajectory(points, `${optimisticMessage}（IK 低层回放）`);
-    return { success: true, localPlayback: true, bestEffort: ikBestEffort };
+   const points = buildSmoothJointMovePoints(start, goal, duration);
+    await sendTrajectory(points, t('msg.ikLowLevelSuffix', {label: optimisticMessage}));
+   return { success: true, localPlayback: true, bestEffort: ikBestEffort };
   }
 
   function buildSmoothJointMovePoints(start, goal, duration) {
@@ -1448,16 +1451,16 @@
     if (!color) return;
     heldVisionTarget = cloneVisionTarget(target);
     if (!window.reBotSim || typeof window.reBotSim.attachObject !== 'function') return;
-    if (window.reBotSim.attachObject(color)) {
-      writeLog(`网页动画：${color} 已绑定到夹爪跟随`, 'ok');
-    }
+   if (window.reBotSim.attachObject(color)) {
+      writeLog(t('log.simAttach', {color}), 'ok');
+   }
   }
 
   function releaseSimCarriedObject() {
     heldVisionTarget = null;
     if (!window.reBotSim || typeof window.reBotSim.releaseObject !== 'function') return;
     if (window.reBotSim.releaseObject({ settleOnTable: true })) {
-      writeLog('网页动画：已释放上一件跟随物体', 'info');
+      writeLog(t('log.simRelease'), 'info');
     }
   }
 
@@ -1536,13 +1539,14 @@
 
   function setVisionBusy(busy, operation) {
     visionSequenceBusy = busy;
+    lastVisionOp = busy ? operation : null;
     if (els.visionPickDemo) {
       els.visionPickDemo.disabled = busy;
-      els.visionPickDemo.textContent = busy && operation === 'pick' ? '抓取中...' : '视觉抓取';
+      els.visionPickDemo.textContent = busy && operation === 'pick' ? t('btn.pickBusy') : t('camera.pick');
     }
     if (els.visionPlaceDemo) {
       els.visionPlaceDemo.disabled = busy;
-      els.visionPlaceDemo.textContent = busy && operation === 'place' ? '放置中...' : '放下物体';
+      els.visionPlaceDemo.textContent = busy && operation === 'place' ? t('btn.placeBusy') : t('camera.place');
     }
     if (els.visionMoveAbove) els.visionMoveAbove.disabled = busy;
     if (els.visionFillPose) els.visionFillPose.disabled = busy;
@@ -1569,9 +1573,9 @@
     });
 
     if (!count) return;
-    const rms = Math.sqrt(sumSq / count);
-    els.feedbackError.textContent = `最大 ${(maxError * 180 / Math.PI).toFixed(2)} 度 ${worstJoint || ''} / RMS ${(rms * 180 / Math.PI).toFixed(2)} 度`;
-    els.feedbackError.style.color = maxError < 0.035 ? '#d7fff4' : (maxError < 0.12 ? '#ffe0b0' : '#ffd1c9');
+   const rms = Math.sqrt(sumSq / count);
+    els.feedbackError.textContent = t('fb.errorMax', {max: (maxError * 180 / Math.PI).toFixed(2), joint: worstJoint || '', rms: (rms * 180 / Math.PI).toFixed(2)});
+   els.feedbackError.style.color = maxError < 0.035 ? '#d7fff4' : (maxError < 0.12 ? '#ffe0b0' : '#ffd1c9');
   }
 
   function updateGravityStatus(active, detail, source) {
@@ -1589,7 +1593,7 @@
     gravityCompensationActive = nextActive;
     gravityStatusSource = nextSource;
     if (!els.gravityStatus) return;
-    els.gravityStatus.textContent = nextActive ? '运行中' : '未运行';
+    els.gravityStatus.textContent = nextActive ? t('st.running') : t('st.notRunning');
     if (detail && detail !== 'GRAVITY_COMP') {
       els.gravityStatus.textContent += ` / ${detail}`;
     }
@@ -1599,11 +1603,11 @@
   function maybeSendGripper(position) {
     syncSimGripper(position);
     if (!client.connected) {
-      setMessage('夹爪已更新到网页仿真；ROS 未连接。');
+      setMessage(t('msg.gripperSimOnly'));
       return;
     }
     if (!controlAllowed(false)) {
-      setMessage('控制锁未打开，网页只更新仿真，不会控制 ROS。');
+      setMessage(t('msg.controlLockClosed'));
       return;
     }
     publishGripper(position);
@@ -1617,7 +1621,7 @@
       !controlAllowed(true, { skipConfirm: true })
     ) return;
     if (!client.connected) {
-      setStatus('closed', 'ROS 未连接');
+      setStatus('closed', t('msg.rosNotConnected'));
       return;
     }
     publishGripper(position);
@@ -1688,17 +1692,17 @@
     }
 
     if (settings.afterMs > 0) await sleep(settings.afterMs);
-    if (settings.requireReached && !reached) {
-      const message = `${label}未确认到位，已停止本轮抓取，避免夹爪未全开就关闭`;
-      setMessage(message);
+   if (settings.requireReached && !reached) {
+      const message = t('msg.gripperNotReached', {label});
+     setMessage(message);
       writeLog(message, 'warn');
       throw new Error(message);
     }
-    const feedback = sawFreshFeedback && Number.isFinite(Number(current))
-      ? `，${source} 反馈 ${Math.round(current * 1000)} 毫米`
-      : '';
-    writeLog(`${label}完成${feedback}`, 'ok');
-  }
+   const feedback = sawFreshFeedback && Number.isFinite(Number(current))
+      ? t('fb.gripperSrcFb', {src: source, mm: Math.round(current * 1000)})
+     : '';
+    writeLog(t('log.gripperDone', {label, fb: feedback}), 'ok');
+ }
 
   function readGripperFeedbackPosition(commandPosition) {
     const jointFeedback = gripperJointFeedback();
@@ -1732,11 +1736,11 @@
     syncSimGripper(position);
     client.publishGripperCommand(position);
     simTargetAngles.set('gripper', position);
-    mirrorHoldUntil.set('gripper', performance.now() + 1200);
-    const feedback = typeof latestGripperPosition === 'number' ? `，当前 ROS反馈 ${Math.round(latestGripperPosition * 1000)} 毫米` : '';
-    setMessage(`夹爪指令已发布：${Math.round(position * 1000)} 毫米${feedback}`);
-    writeLog(`夹爪指令 ${Math.round(position * 1000)} 毫米 -> /${NS}/gripper/cmd`, 'ok');
-    window.setTimeout(() => {
+   mirrorHoldUntil.set('gripper', performance.now() + 1200);
+    const feedback = typeof latestGripperPosition === 'number' ? t('fb.gripperFb', {mm: Math.round(latestGripperPosition * 1000)}) : '';
+    setMessage(t('msg.gripperCmdPublished', {mm: Math.round(position * 1000), fb: feedback}));
+    writeLog(t('log.gripperCmd', {mm: Math.round(position * 1000), topic: '/' + NS + '/gripper/cmd'}), 'ok');
+   window.setTimeout(() => {
       if (client.connected) client.publishGripperCommand(position);
     }, 120);
   }
@@ -1780,18 +1784,19 @@
   }
 
   function setStatus(state, message) {
+    lastStatusState = state;
     els.status.className = 'mini-pill';
     if (state === 'open') {
       els.status.classList.add('online');
-      els.status.textContent = '在线';
+      els.status.textContent = t('st.online');
     } else if (state === 'connecting') {
       els.status.classList.add('warn');
-      els.status.textContent = '连接中';
+      els.status.textContent = t('st.connecting');
     } else if (state === 'error') {
       els.status.classList.add('error');
-      els.status.textContent = '错误';
+      els.status.textContent = t('st.error');
     } else {
-      els.status.textContent = '离线';
+      els.status.textContent = t('st.offline');
     }
     setMessage(message);
   }
@@ -1811,5 +1816,34 @@
     line.querySelector('span').textContent = String(message);
     els.log.prepend(line);
     while (els.log.children.length > 80) els.log.lastElementChild.remove();
+  }
+
+  if (window.rebotI18n) {
+    window.rebotI18n.onLangChange(() => {
+      // Re-render ROS connection status pill
+      if (lastStatusState !== null && els.status) {
+        if (lastStatusState === 'open') {
+          els.status.textContent = t('st.online');
+        } else if (lastStatusState === 'connecting') {
+          els.status.textContent = t('st.connecting');
+        } else if (lastStatusState === 'error') {
+          els.status.textContent = t('st.error');
+        } else {
+          els.status.textContent = t('st.offline');
+        }
+      }
+      // Re-render gravity compensation status
+      if (els.gravityStatus) {
+        els.gravityStatus.textContent = gravityCompensationActive ? t('st.running') : t('st.notRunning');
+        els.gravityStatus.style.color = gravityCompensationActive ? '#d7fff4' : '#ffe0b0';
+      }
+      // Re-render vision pick/place demo buttons
+      if (els.visionPickDemo) {
+        els.visionPickDemo.textContent = visionSequenceBusy && lastVisionOp === 'pick' ? t('btn.pickBusy') : t('camera.pick');
+      }
+      if (els.visionPlaceDemo) {
+        els.visionPlaceDemo.textContent = visionSequenceBusy && lastVisionOp === 'place' ? t('btn.placeBusy') : t('camera.place');
+      }
+    });
   }
 })();

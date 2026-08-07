@@ -1,4 +1,5 @@
 (function () {
+  const t = window.rebotI18n ? window.rebotI18n.t : (k) => k;
   class ReBotRosClient extends EventTarget {
     constructor(options) {
       super();
@@ -22,20 +23,20 @@
       if (url) this.url = url;
       this._manualClose = false;
       if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-        this._emitStatus('open', 'ROS 已连接');
+        this._emitStatus('open', t('client.connected'));
         return;
       }
       if (this.socket && this.socket.readyState === WebSocket.CONNECTING) return;
 
       const seq = ++this._connectSeq;
-      this._emitStatus('connecting', `正在连接 ${this.url}`);
+      this._emitStatus('connecting', t('client.connecting', { url: this.url }));
       this.socket = new WebSocket(this.url);
       const socket = this.socket;
 
       socket.addEventListener('open', () => {
         if (seq !== this._connectSeq || socket !== this.socket) return;
         this.connected = true;
-        this._emitStatus('open', 'ROS 已连接');
+        this._emitStatus('open', t('client.connected'));
         this._resubscribe();
       });
 
@@ -43,14 +44,14 @@
         if (seq === this._connectSeq && socket === this.socket) this._handleMessage(event);
       });
       socket.addEventListener('error', () => {
-        if (seq === this._connectSeq && socket === this.socket) this._emitStatus('error', 'ROS WebSocket 出错');
+        if (seq === this._connectSeq && socket === this.socket) this._emitStatus('error', t('client.wsError'));
       });
       socket.addEventListener('close', () => {
         if (seq !== this._connectSeq || socket !== this.socket) return;
         this.connected = false;
-        this._rejectPendingServices('ROS 连接已断开');
-        this._rejectPendingActions('ROS 连接已断开');
-        this._emitStatus('closed', 'ROS 已断开');
+        this._rejectPendingServices(t('client.disconnected'));
+        this._rejectPendingActions(t('client.disconnected'));
+        this._emitStatus('closed', t('client.closed'));
         if (!this._manualClose && this.autoReconnect) {
           window.setTimeout(() => this.connect(), this.reconnectDelay);
         }
@@ -61,9 +62,9 @@
       this._manualClose = true;
       this.autoReconnect = false;
       this.connected = false;
-      this._rejectPendingServices('ROS 连接已断开');
-      this._rejectPendingActions('ROS 连接已断开');
-      this._emitStatus('closed', 'ROS 已断开');
+      this._rejectPendingServices(t('client.disconnected'));
+      this._rejectPendingActions(t('client.disconnected'));
+      this._emitStatus('closed', t('client.closed'));
       if (this.socket) this.socket.close();
       this.socket = null;
     }
@@ -83,7 +84,7 @@
       const id = this._id('service');
       return new Promise((resolve, reject) => {
         if (!this.connected) {
-          reject(new Error('ROS 未连接'));
+          reject(new Error(t('client.notConnected')));
           return;
         }
         this._pendingServices.set(id, { resolve, reject });
@@ -158,7 +159,7 @@
       const id = this._id('action');
       return new Promise((resolve, reject) => {
         if (!this.connected) {
-          reject(new Error('ROS 未连接'));
+          reject(new Error(t('client.notConnected')));
           return;
         }
         this._pendingActions.set(id, { resolve, reject, action: actionName });
@@ -285,7 +286,7 @@
       try {
         data = JSON.parse(event.data);
       } catch (error) {
-        this._emitStatus('error', '收到无法解析的 ROS 消息');
+        this._emitStatus('error', t('client.badMsg'));
         return;
       }
 
@@ -301,7 +302,7 @@
         if (!pending) return;
         this._pendingServices.delete(data.id);
         if (data.result === false) {
-          pending.reject(new Error(data.values && data.values.message ? data.values.message : 'ROS service failed'));
+          pending.reject(new Error(data.values && data.values.message ? data.values.message : t('client.serviceFailed')));
         } else {
           pending.resolve(data.values || {});
         }
@@ -326,10 +327,10 @@
         if (!pending) return;
         this._pendingActions.delete(data.id);
         if (data.result === false) {
-          const message = typeof data.values === 'string'
-            ? data.values
-            : (data.values && data.values.message ? data.values.message : 'ROS action failed');
-          pending.reject(new Error(message));
+         const message = typeof data.values === 'string'
+           ? data.values
+            : (data.values && data.values.message ? data.values.message : t('client.actionFailed'));
+         pending.reject(new Error(message));
           return;
         }
         pending.resolve({

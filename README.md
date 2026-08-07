@@ -93,66 +93,16 @@ pip install -e .    # 可编辑安装，或直接用 sys.path 引用
 
 > **注意**：SDK 的 `pyproject.toml` 声明 `requires-python >=3.10,<3.12`，但本项目通过 `sys.path` 引用而非 pip 安装，在 Python 3.12 下可正常工作。如果 pip 安装报版本冲突，跳过 `pip install -e .`，确保目录在 `~/reBotArm_control_py/` 即可（代码会自动搜索此路径）。
 
-### 3. 创建 Python venv 并安装依赖
+### 3. 运行安装脚本
+
+`setup.sh` 自动完成 venv 创建（`--system-site-packages`）、Python 依赖安装、`tf_transformations` 提取、导入验证和 `colcon build`：
 
 ```bash
-cd ~/reBot_Arm_Mujoco-DM/reBotArmController_ROS2-main
-
-# 创建 venv（必须启用系统站点包，否则 rosbridge 的 tornado/psutil 等不可见）
-python3 -m venv .venv --system-site-packages
-source .venv/bin/activate
-
-# 安装 Python 依赖
-pip install mujoco pin motorbridge numpy pyyaml transforms3d tornado psutil
+cd ~/reBot_Arm_Mujoco-DM
+./setup.sh
 ```
 
-### 4. 安装 tf_transformations
-
-`tf_transformations` 不在 pip 上，需从 ROS .deb 提取：
-
-```bash
-# 下载并提取到 venv
-cd /tmp
-apt download ros-jazzy-tf-transformations
-dpkg-deb -x ros-jazzy-tf-transformations*.deb tf_transformations_extract
-cp -r tf_transformations_extract/opt/ros/jazzy/lib/python3.12/site-packages/tf_transformations \
-      ~/reBot_Arm_Mujoco-DM/reBotArmController_ROS2-main/.venv/lib/python3.12/site-packages/
-```
-
-### 5. 验证 venv 配置
-
-```bash
-# 确认系统站点包已启用
-grep "include-system-site-packages" .venv/pyvenv.cfg
-# 应输出: include-system-site-packages = true
-
-# 如果是 false，修改：
-sed -i 's/include-system-site-packages = false/include-system-site-packages = true/' .venv/pyvenv.cfg
-
-# 验证所有关键包可导入
-.venv/bin/python -c "
-import mujoco; print('mujoco', mujoco.__version__)
-import pinocchio as pin; print('pinocchio', pin.__version__)
-import motorbridge; print('motorbridge OK')
-import tornado; print('tornado OK')
-import psutil; print('psutil OK')
-import argcomplete; print('argcomplete OK')
-import bson; print('bson OK')
-import tf_transformations; print('tf_transformations OK')
-import sys; sys.path.insert(0, '/home/robot/reBotArm_control_py')
-from reBotArm_control_py.actuator import RebotArm; print('SDK OK')
-"
-```
-
-### 6. 编译 ROS 2 工作空间
-
-```bash
-cd ~/reBot_Arm_Mujoco-DM/reBotArmController_ROS2-main
-source /opt/ros/jazzy/setup.bash
-source .venv/bin/activate
-colcon build --symlink-install
-```
-
+> 只检查不安装：`./setup.sh --check`
 
 ## 项目结构
 
@@ -171,6 +121,8 @@ colcon build --symlink-install
 │     ├─ rebotarmcontroller/        真机驱动、Fake Driver、硬件管理
 │     ├─ rebotarm_bringup/          URDF、STL、launch、电机配置
 │     ├─ rebotarm_mujoco/           MuJoCo 仿真、IK、相机、视觉
+│     ├─ rebotarm_moveit_config/   MoveIt 运动规划配置
+│     ├─ rebotarm_moveit_demos/    MoveIt 演示（画方块、抓取放置）
 │     └─ rebotarm_agent/            MCP Server 与文本 Agent
 └─ reBotArm_simulator-DM/           Node.js + Three.js 网页控制台
    ├─ public/                       页面、样式、前端逻辑
@@ -191,7 +143,7 @@ colcon build --symlink-install
 ### 克隆后一键安装（推荐）
 
 ```bash
-git clone <本仓库地址>
+git clone https://github.com/Seeed-Projects/Borot-Arm_Mujoco.git
 cd reBot_Arm_Mujoco-DM
 ./setup.sh
 ./rebotarm doctor
@@ -206,13 +158,18 @@ cd reBot_Arm_Mujoco-DM
 统一启动入口：
 
 ```bash
+# 启动前确认设备节点并赋予权限
+ls /dev/ttyACM*
+sudo chmod 666 /dev/ttyACM* 
+```
+```bash
 ./rebotarm start web   # rosbridge + 网页
 ./rebotarm start dm    # DM 真机（单独终端）
 ./rebotarm start sim   # MuJoCo 仿真；不要与 DM 真机同时启动
 ./rebotarm status
 ```
 
-所有命令前先 source 环境：
+所有命令前先 source 环境（统一启动入口自启动）：
 
 ```bash
 cd ~/reBot_Arm_Mujoco-DM/reBotArmController_ROS2-main
@@ -231,7 +188,7 @@ ros2 launch rebotarm_bringup fake_bringup.launch.py
 
 ```bash
 # 确认设备节点并赋予权限
-ls /dev/ttyACM0
+ls /dev/ttyACM0 #默认为ACM0
 sudo chmod 666 /dev/ttyACM0 
 
 # 启动真机驱动
@@ -270,6 +227,8 @@ node server.js
 2. 在 WebSocket 输入框填入 rosbridge 地址（如 `ws://localhost:9090`），地址会自动记忆
 3. 点击「连接 ROS」
 4. 3D 模型应显示真机当前姿态
+
+面板顶部「中/EN」开关可切换中/英文界面，所有面板、二级菜单、帮助与状态提示同步切换，无需刷新页面。
 
 **控制真机（两步解锁）：**
 
@@ -406,9 +365,6 @@ SDK 配置文件：`~/reBotArm_control_py/config/rebotarm_dm.yaml`
 距离_m = (弧度 / −5.0) × 0.09
 ```
 
-> **历史问题**：早期版本夹爪使用 MIT 模式 + 500 Hz 外部 PD 环（`_gripper_safe_mit`），与电机内部 MIT PD 叠加形成双重 PD，导致闭合时持续抖动。已改为 POS_VEL 模式，与 motorbridge studio 行为一致，问题消除。
-
-
 
 ### 网页 rosbridge 地址
 
@@ -427,11 +383,6 @@ venv 必须启用 `include-system-site-packages = true`（`.venv/pyvenv.cfg`）�
 
 ## 故障排查
 
-### `ModuleNotFoundError: No module named 'pinocchio'`
-
-安装 `pin`（不是 `pinocchio`）：
-```bash
-pip install pin
 ```
 
 ### `ModuleNotFoundError: No module named 'tornado'/'psutil'/'argcomplete'/'bson'`
@@ -453,37 +404,19 @@ sed -i 's/include-system-site-packages = false/include-system-site-packages = tr
 
 确认三步解锁：
 1. 在「ROS2 桥接」面板连接 ROS（WebSocket 连接到真机控制器的 rosbridge）
-2. 勾选「允许控制」→ 确认对话框点「确定」
+2. 勾选「允许控制」
 3. 点「使能」按钮
-
-### 夹爪不同步到网页
-
-`/rebotarm/gripper/state` 的 position 必须是米（0~0.09），不是弧度。如果不同步，检查 `ros_publishers.py` 是否使用 `gripper_position_m()`。
-
-### 夹爪闭合抖动
-
-降低夹爪目标力矩 `_G_DEFAULT_FORCE`（如 0.30→0.15），或增大夹爪到位容差 `_G_ARRIVE_TOL`。
-
-### 重力补偿停止后机械臂异常
-
-`stop_gravity_compensation` 必须调用 `self._arm.arm.mode_pos_vel()`（不是 `self._arm.mode_pos_vel()`），否则电机无法切回 POS_VEL 模式。
 
 ## 已知修复（DM 适配）
 
 | 问题 | 根因 | 修复 |
 | --- | --- | --- |
 | SDK API 不兼容 | 仓库使用旧 API（`RobotArm`），DM SDK 用新 API（`RebotArm`） | 重写 `hardware_manager.py` 21 处 |
-| Pinocchio 导入失败 | pip 包名是 `pin` 不是 `pinocchio` | 安装 `pin` |
 | rosbridge 缺依赖 | venv 隔离了系统包 | 启用 `include-system-site-packages` |
-| 夹爪不同步 | 发布原始弧度，网页期望米 | `ros_publishers.py` 改用 `gripper_position_m()` |
-| 关节滑块控不了真机 | pos_vel 循环覆盖单关节命令 | `send_joint_motor_cmd` 同步 `_q_target` |
-| 夹爪 mode 1 不工作 | 直接 `send_pos_vel` 传米给弧度电机 | 改走 `set_gripper_target` |
+| 关节滑块控不了真机 | pos_vel 循环覆盖单关节命令 | 
 | 重力补偿停止异常 | `self._arm.mode_pos_vel()` 应为 `self._arm.arm.mode_pos_vel()` | 修正调用路径 |
-| 控制锁不生效 | 仿真模式跳过控制锁检查 | `controlAllowed` 所有模式统一检查 |
-| 夹爪闭合抖动 | kp=5.0 过高、kd=1.0 不足 | 降至 kp=2.0、kd=2.0 |
 
 ## 文档
-
 - [项目架构、MuJoCo 与网页说明](./PROJECT_ARCHITECTURE_ZH.md)
 - [DM 真机数据链路与数据流向](./DATA_FLOW_ZH.md)
 - [B601-DM 用户使用手册](./USER_MANUAL_ZH.md)
