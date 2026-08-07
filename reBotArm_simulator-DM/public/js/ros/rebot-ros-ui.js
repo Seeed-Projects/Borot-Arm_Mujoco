@@ -389,10 +389,16 @@
     writeLog(`${command.label || command.source || '批量目标'} -> ROS ${names.length} 轴`, 'ok');
   }
 
- async function checkIk() {
-   if (!controlAllowed(true)) return;
-   const pose = readPose();
-    await guardedCall(() => client.solveMoveToPoseIK(pose), '已请求 IK 运动', true);
+  async function checkIk() {
+    if (!controlAllowed(true)) return;
+    const pose = readPose();
+    const duration = getPoseDuration();
+    client.publishTargetPose(pose);
+    await guardedCall(
+      () => client.moveToPose(pose, duration),
+      `已请求 IK 平滑运动（${duration.toFixed(1)} 秒）`,
+      true
+    );
   }
 
   async function queryGravityCompensation(options) {

@@ -208,7 +208,7 @@
           <label>X m<input id="ros-pose-x" type="number" step="0.005" value="0.30"></label>
           <label>Y m<input id="ros-pose-y" type="number" step="0.005" value="0.00"></label>
           <label>Z m<input id="ros-pose-z" type="number" step="0.005" value="0.30"></label>
-          <label>时长 s<input id="ros-pose-duration" type="number" step="0.2" value="2.0"></label>
+          <label>时长 s<input id="ros-pose-duration" type="number" min="0.4" max="8" step="0.2" value="2.0"></label>
         </div>
         <div class="button-grid">
           <button type="button" id="ros-check-ik">IK 运动</button>
@@ -249,9 +249,8 @@
         <h4 style="color:#d7fff4;margin-bottom:4px;">五、Pose 运动</h4>
         <div style="line-height:1.7;font-size:13px;margin-bottom:12px;">
           <p><b>X / Y / Z</b>：输入末端目标位置（米），默认 X=0.30, Y=0.00, Z=0.30。</p>
-          <p><b>时长</b>：轨迹执行时间（秒），默认 2.0s。</p>
-          <p><b>IK 运动</b>：解算逆运动学并直接设为目标，快速到位（无平滑轨迹）。需勾选控制锁 + 使能。预期：机械臂快速运动到目标位置，日志显示 IK 解算结果。</p>
-          <p><b>发送 Pose</b>：规划平滑轨迹（min-jerk）后运动到目标位姿，时长可控。需勾选控制锁 + 使能。预期：机械臂沿平滑轨迹运动到目标，3D 模型同步。</p>
+          <p><b>时长</b>：IK 平滑轨迹的执行时间（0.4~8 秒），默认 2.0 秒；时间越长，运动越慢。</p>
+          <p><b>IK 运动</b>：先解算逆运动学，再按照上面的时长执行平滑轨迹。需勾选控制锁 + 使能。预期：机械臂在指定时间内运动到目标位置，日志显示执行结果。</p>
         </div>
 
         <h4 style="color:#d7fff4;margin-bottom:4px;">六、关节滑块</h4>
@@ -344,7 +343,7 @@
   <script src="/lib/URDFLoader.js"></script>
   <script src="/js/ros/rebot-ros-client.js?v=20260806-objectfeedback1"></script>
   <script src="/js/rebot-sim.js?v=20260807-metalpalmplate1"></script>
-  <script src="/js/ros/rebot-ros-ui.js?v=20260807-objectassociation1"></script>
+  <script src="/js/ros/rebot-ros-ui.js?v=20260807-timedik1"></script>
   <script src="/js/rebot-llm.js?v=20260728-cleanup1"></script>
 </body>
 </html>
