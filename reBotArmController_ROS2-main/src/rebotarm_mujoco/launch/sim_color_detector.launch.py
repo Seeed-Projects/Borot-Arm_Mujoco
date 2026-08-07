@@ -11,6 +11,8 @@ def generate_launch_description():
     detections_topic = LaunchConfiguration("detections_topic")
     target_pose_topic = LaunchConfiguration("target_pose_topic")
     poses_topic = LaunchConfiguration("poses_topic")
+    object_states_topic = LaunchConfiguration("object_states_topic")
+    object_association_max_distance_m = LaunchConfiguration("object_association_max_distance_m")
     target_color = LaunchConfiguration("target_color")
     process_hz = LaunchConfiguration("process_hz")
     roi_u_min = LaunchConfiguration("roi_u_min")
@@ -45,6 +47,11 @@ def generate_launch_description():
                 default_value="/rebotarm/vision/color_blocks/target_pose",
             ),
             DeclareLaunchArgument("poses_topic", default_value="/rebotarm/vision/color_blocks/poses"),
+            DeclareLaunchArgument(
+                "object_states_topic",
+                default_value="/rebotarm/mujoco/object_states",
+            ),
+            DeclareLaunchArgument("object_association_max_distance_m", default_value="0.055"),
             DeclareLaunchArgument("target_color", default_value="red"),
             DeclareLaunchArgument("process_hz", default_value="8.0"),
             DeclareLaunchArgument("roi_u_min", default_value="0.24"),
@@ -74,6 +81,8 @@ def generate_launch_description():
                         "detections_topic": detections_topic,
                         "target_pose_topic": target_pose_topic,
                         "poses_topic": poses_topic,
+                        "object_states_topic": object_states_topic,
+                        "object_association_max_distance_m": object_association_max_distance_m,
                         "target_color": target_color,
                         "process_hz": process_hz,
                         "roi_u_min": roi_u_min,

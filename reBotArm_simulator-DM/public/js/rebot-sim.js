@@ -5,8 +5,22 @@
   const GRIPPER_COMMAND_MAX = 0.09;
   const GRIPPER_VISUAL_MAX = 0.057;
   const GRIPPER_ANIMATION_MS = 520;
-  const GRIPPER_MESH_VERSION = 'real-finish-v8';
+  const GRIPPER_MESH_VERSION = 'real-finish-v11-metal-palm-plate';
   const FAKE_GRASP_LOCAL_OFFSET = new THREE.Vector3(-0.05, 0, -0.02);
+  const TABLE_CENTER_X = 0.42;
+  const TABLE_WIDTH = 0.60;
+  const TABLE_DEPTH = 0.52;
+  const TABLE_SURFACE_Y = 0.03;
+  const MUJOCO_OBJECT_COLORS = Object.freeze({
+    red_cube: 'red',
+    blue_block: 'blue',
+    yellow_cylinder: 'yellow'
+  });
+  const ROS_TO_THREE_FRAME = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(1, 0, 0),
+    -Math.PI / 2
+  );
+  const THREE_TO_ROS_FRAME = ROS_TO_THREE_FRAME.clone().invert();
 
   // Material groups are encoded as [material index, triangle count].  The
   // source STL files contain separate CAD solids, but STLLoader presents them
@@ -21,7 +35,13 @@
     link5: [[3, 932], [0, 32400], [3, 5688], [1, 940], [0, 2136], [1, 2658], [3, 428]],
     link6: [[0, 1904], [3, 2926], [0, 35058]]
   };
-  const GRIPPER_BASE_FINISH_GROUPS = [[2, 2338], [4, 2212], [2, 2184], [4, 2628], [3, 2484]];
+  const GRIPPER_BASE_FINISH_GROUPS = [[2, 2338], [2, 2212], [2, 2184], [5, 2628], [3, 2484]];
+  const GRIPPER_FINGER_FACE_RANGES = {
+    rack: [0, 2148],
+    finger: [2148, 1142],
+    travelStop: [3290, 1080],
+    carriage: [4370, 400]
+  };
 
   const jointDefs = [
     { name: 'joint1', label: 'J1 底座偏航', min: -2.8, max: 2.8, home: 0 },
@@ -65,6 +85,7 @@
   let moveDuration = 900;
   let gripperMotion = null;
   let carriedObject = null;
+  let mujocoObjectFeedbackAt = 0;
   const taskObjects = new Map();
   let dragMode = false;
   let draggingTcp = false;
@@ -254,14 +275,68 @@
     scene.add(grid);
 
     const table = new THREE.Group();
-    const tableMat = new THREE.MeshStandardMaterial({ color: 0x585b55, roughness: 0.72, metalness: 0.05 });
-    const top = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.03, 0.52), tableMat);
-    top.position.set(0.42, 0.015, 0);
+    const tableTexture = createTableTexture();
+    const tableMat = new THREE.MeshStandardMaterial({
+      color: 0xc9c5ae,
+      map: tableTexture,
+      roughness: 0.68,
+      metalness: 0.04
+    });
+    const top = new THREE.Mesh(new THREE.BoxGeometry(TABLE_WIDTH, 0.03, TABLE_DEPTH), tableMat);
+    top.position.set(TABLE_CENTER_X, TABLE_SURFACE_Y - 0.015, 0);
+    top.castShadow = true;
     top.receiveShadow = true;
+    top.userData.collisionKind = 'table';
     table.add(top);
+
+    const edgeBand = new THREE.Mesh(
+      new THREE.BoxGeometry(TABLE_WIDTH + 0.008, 0.012, TABLE_DEPTH + 0.008),
+      new THREE.MeshStandardMaterial({ color: 0x454a43, roughness: 0.5, metalness: 0.16 })
+    );
+    edgeBand.position.set(TABLE_CENTER_X, 0.006, 0);
+    edgeBand.castShadow = true;
+    edgeBand.receiveShadow = true;
+    table.add(edgeBand);
+
+    const topOutline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(top.geometry, 28),
+      new THREE.LineBasicMaterial({ color: 0xeee9d2, transparent: true, opacity: 0.34 })
+    );
+    topOutline.position.copy(top.position);
+    table.add(topOutline);
 
     scene.add(table);
     scene.add(createTaskSpace());
+  }
+
+  function createTableTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    const image = ctx.createImageData(canvas.width, canvas.height);
+    let seed = 601;
+    for (let y = 0; y < canvas.height; y += 1) {
+      for (let x = 0; x < canvas.width; x += 1) {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        const grain = ((seed >>> 24) / 255 - 0.5) * 12;
+        const streak = Math.sin(y * 0.23) * 2.4 + Math.sin(y * 0.057) * 2.0;
+        const index = (y * canvas.width + x) * 4;
+        image.data[index] = clamp(205 + grain + streak, 0, 255);
+        image.data[index + 1] = clamp(201 + grain + streak, 0, 255);
+        image.data[index + 2] = clamp(179 + grain + streak, 0, 255);
+        image.data[index + 3] = 255;
+      }
+    }
+    ctx.putImageData(image, 0, 0);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(3.2, 2.6);
+    texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    if ('colorSpace' in texture) texture.colorSpace = THREE.SRGBColorSpace;
+    else if (THREE.sRGBEncoding !== undefined) texture.encoding = THREE.sRGBEncoding;
+    return texture;
   }
 
   function createDirectionAxes() {
@@ -325,14 +400,15 @@
 
   function createTaskSpace() {
     const group = new THREE.Group();
-    addZone(group, 'Pick zone', 0.42, -0.13, 0x77c96b, 0.57, 0.24);
-    addZone(group, 'Place zone', 0.42, 0.13, 0xf2a541, 0.57, 0.24);
+    addZone(group, 'Pick zone', 0.42, -0.13, 0x3f9f56, 0.57, 0.24);
+    addZone(group, 'Place zone', 0.42, 0.13, 0x777368, 0.57, 0.24);
 
     const objects = [
       {
         key: 'red',
         label: '红色方块',
-        color: 0xef5a4d,
+        color: 0xd52b21,
+        material: { roughness: 0.25, metalness: 0.03, clearcoat: 0.52, clearcoatRoughness: 0.18 },
         position: [0.34, -0.13, 0.055],
         tableY: 0.055,
         geometry: new THREE.BoxGeometry(0.05, 0.05, 0.05)
@@ -340,7 +416,8 @@
       {
         key: 'blue',
         label: '蓝色方块',
-        color: 0x0ac7e8,
+        color: 0x008fc5,
+        material: { roughness: 0.38, metalness: 0.08, clearcoat: 0.28, clearcoatRoughness: 0.3 },
         position: [0.50, 0.11, 0.048],
         tableY: 0.048,
         geometry: new THREE.BoxGeometry(0.09, 0.036, 0.044)
@@ -348,7 +425,8 @@
       {
         key: 'yellow',
         label: '圆柱',
-        color: 0xf2c84b,
+        color: 0xeeb900,
+        material: { roughness: 0.3, metalness: 0.12, clearcoat: 0.42, clearcoatRoughness: 0.22 },
         position: [0.44, -0.02, 0.065],
         tableY: 0.065,
         geometry: new THREE.CylinderGeometry(0.022, 0.022, 0.07, 24)
@@ -358,7 +436,12 @@
     objects.forEach((object) => {
       const item = new THREE.Mesh(
         object.geometry,
-        new THREE.MeshStandardMaterial({ color: object.color, roughness: 0.55 })
+        new THREE.MeshPhysicalMaterial({
+          color: object.color,
+          emissive: object.color,
+          emissiveIntensity: 0.035,
+          ...object.material
+        })
       );
       const [rosX, rosY, rosZ] = object.position;
       item.position.set(rosX, rosZ, -rosY);
@@ -368,10 +451,22 @@
       item.userData.targetKind = 'object';
       item.userData.targetLabel = object.label;
       item.userData.targetColor = object.key;
-      item.userData.tableY = object.tableY;
+      item.geometry.computeBoundingBox();
+      const size = new THREE.Vector3();
+      item.geometry.boundingBox.getSize(size);
+      item.userData.halfSize = size.multiplyScalar(0.5);
+      item.userData.tableY = TABLE_SURFACE_Y + item.userData.halfSize.y;
+      item.userData.collisionKind = 'task-object';
       item.userData.restPosition = item.position.clone();
       taskObjects.set(object.key, item);
       group.add(item);
+
+      const outline = new THREE.LineSegments(
+        new THREE.EdgesGeometry(object.geometry, 32),
+        new THREE.LineBasicMaterial({ color: 0x17201d, transparent: true, opacity: 0.42 })
+      );
+      outline.renderOrder = 2;
+      item.add(outline);
     });
     return group;
   }
@@ -379,9 +474,13 @@
   function addZone(group, label, rosX, rosY, color, width, depth) {
     const zone = new THREE.Mesh(
       new THREE.BoxGeometry(width || 0.18, 0.004, depth || 0.18),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18 })
+      new THREE.MeshStandardMaterial({ color, roughness: 0.76, metalness: 0.025 })
     );
-    zone.position.set(rosX, 0.033, -rosY);
+    // Keep the decorative zone almost flush with the table collision surface.
+    // Raising it by its full thickness makes correctly resting objects appear
+    // to penetrate the zone by roughly 4 mm.
+    zone.position.set(rosX, TABLE_SURFACE_Y - 0.002 + 0.0002, -rosY);
+    zone.receiveShadow = true;
     zone.userData.clickTarget = true;
     zone.userData.targetKind = 'zone';
     zone.userData.targetLabel = label;
@@ -389,7 +488,7 @@
 
     const border = new THREE.LineSegments(
       new THREE.EdgesGeometry(zone.geometry),
-      new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7 })
+      new THREE.LineBasicMaterial({ color: 0xd8d5c3, transparent: true, opacity: 0.52 })
     );
     border.position.copy(zone.position);
     group.add(border);
@@ -682,14 +781,30 @@
     endLink.add(group);
 
     const loader = new THREE.STLLoader();
-    const parts = [
-      { name: 'gripper_base', file: 'gripper_base.stl', finish: 'accent', moving: false },
-      { name: 'left_finger', file: 'left_finger.stl', finish: 'finger', moving: true },
-      { name: 'right_finger', file: 'right_finger.stl', finish: 'finger', moving: true }
-    ];
+    const [base, leftGeometry, rightGeometry] = await Promise.all([
+      loadGripperMesh(loader, { name: 'gripper_base', file: 'gripper_base.stl', finish: 'accent', moving: false }, ghost),
+      loadGripperGeometry(loader, 'left_finger.stl'),
+      loadGripperGeometry(loader, 'right_finger.stl')
+    ]);
+    const fingerMaterials = createGripperFingerMaterials(ghost);
 
-    const meshes = await Promise.all(parts.map((part) => loadGripperMesh(loader, part, ghost)));
-    meshes.forEach((mesh) => group.add(mesh));
+    group.add(base);
+    // The two racks cross behind the pinion: the rack visible on the left is
+    // mechanically part of the right jaw, and vice versa.
+    group.add(createGripperFingerAssembly(
+      'left_finger',
+      leftGeometry,
+      rightGeometry,
+      fingerMaterials,
+      ghost
+    ));
+    group.add(createGripperFingerAssembly(
+      'right_finger',
+      rightGeometry,
+      leftGeometry,
+      fingerMaterials,
+      ghost
+    ));
     updateGripperVisual(group, currentAngles.gripper ?? 0);
     return group;
   }
@@ -739,6 +854,103 @@
         resolve(mesh);
       }, undefined, reject);
     });
+  }
+
+  function loadGripperGeometry(loader, file) {
+    return new Promise((resolve, reject) => {
+      loader.load(`/api/gripper_meshes/${file}?v=${GRIPPER_MESH_VERSION}`, (geometry) => {
+        geometry.computeVertexNormals();
+        resolve(geometry);
+      }, undefined, reject);
+    });
+  }
+
+  function createGripperFingerMaterials(ghost) {
+    if (ghost) {
+      const ghostMaterial = new THREE.MeshStandardMaterial({
+        color: 0x33d6b0,
+        transparent: true,
+        opacity: 0.22,
+        roughness: 0.46,
+        metalness: 0.18,
+        side: THREE.DoubleSide
+      });
+      return {
+        finger: ghostMaterial,
+        carriage: ghostMaterial,
+        rack: ghostMaterial,
+        travelStop: ghostMaterial
+      };
+    }
+
+    return {
+      finger: new THREE.MeshStandardMaterial({
+        color: 0x171b1a,
+        roughness: 0.46,
+        metalness: 0.34,
+        side: THREE.DoubleSide
+      }),
+      carriage: new THREE.MeshStandardMaterial({
+        color: 0x3d4745,
+        roughness: 0.58,
+        metalness: 0.24,
+        side: THREE.DoubleSide
+      }),
+      rack: new THREE.MeshStandardMaterial({
+        color: 0xaeb5b1,
+        roughness: 0.34,
+        metalness: 0.72,
+        side: THREE.DoubleSide
+      }),
+      travelStop: new THREE.MeshStandardMaterial({
+        color: 0xb9d51e,
+        emissive: 0x0b1000,
+        emissiveIntensity: 0.04,
+        roughness: 0.52,
+        metalness: 0.04,
+        side: THREE.DoubleSide
+      })
+    };
+  }
+
+  function createGripperFingerAssembly(name, bodyGeometry, oppositeGeometry, materials, ghost) {
+    const assembly = new THREE.Group();
+    assembly.name = name;
+    assembly.userData.isMovingFinger = true;
+
+    addGripperFingerPart(assembly, `${name}_finger`, bodyGeometry, GRIPPER_FINGER_FACE_RANGES.finger, materials.finger, ghost);
+    addGripperFingerPart(assembly, `${name}_travel_stop`, bodyGeometry, GRIPPER_FINGER_FACE_RANGES.travelStop, materials.travelStop, ghost);
+    addGripperFingerPart(assembly, `${name}_carriage`, bodyGeometry, GRIPPER_FINGER_FACE_RANGES.carriage, materials.carriage, ghost);
+    addGripperFingerPart(assembly, `${name}_rack`, oppositeGeometry, GRIPPER_FINGER_FACE_RANGES.rack, materials.rack, ghost);
+    return assembly;
+  }
+
+  function addGripperFingerPart(parent, name, sourceGeometry, faceRange, material, ghost) {
+    const geometry = sliceNonIndexedGeometry(sourceGeometry, faceRange[0], faceRange[1]);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = name;
+    mesh.castShadow = !ghost;
+    mesh.receiveShadow = !ghost;
+    parent.add(mesh);
+  }
+
+  function sliceNonIndexedGeometry(source, startFace, faceCount) {
+    const geometry = new THREE.BufferGeometry();
+    const startVertex = startFace * 3;
+    const endVertex = (startFace + faceCount) * 3;
+
+    Object.entries(source.attributes).forEach(([name, attribute]) => {
+      const start = startVertex * attribute.itemSize;
+      const end = endVertex * attribute.itemSize;
+      const values = attribute.array.slice(start, end);
+      geometry.setAttribute(
+        name,
+        new THREE.BufferAttribute(values, attribute.itemSize, attribute.normalized)
+      );
+    });
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+    return geometry;
   }
 
   function updateGripperVisual(group, widthM) {
@@ -1645,9 +1857,151 @@
 
   function updateCarriedObject() {
     if (!carriedObject || !carriedObject.mesh || !robot) return;
+    if (hasFreshMujocoObjectFeedback()) return;
     const grip = getFakeGraspPosition(robot) || getTcpPosition(robot);
     if (!grip) return;
     carriedObject.mesh.position.lerp(grip, 0.55);
+    enforceTableCollision(carriedObject.mesh);
+  }
+
+  function hasFreshMujocoObjectFeedback() {
+    return mujocoObjectFeedbackAt > 0 && performance.now() - mujocoObjectFeedbackAt < 500;
+  }
+
+  function getObjectHalfSize(mesh) {
+    if (mesh && mesh.userData && mesh.userData.halfSize) {
+      return mesh.userData.halfSize;
+    }
+    if (!mesh || !mesh.geometry) return new THREE.Vector3();
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    const size = new THREE.Vector3();
+    mesh.geometry.boundingBox.getSize(size);
+    mesh.userData.halfSize = size.multiplyScalar(0.5);
+    return mesh.userData.halfSize;
+  }
+
+  function isOverTable(mesh) {
+    const half = getObjectHalfSize(mesh);
+    const minX = TABLE_CENTER_X - TABLE_WIDTH / 2;
+    const maxX = TABLE_CENTER_X + TABLE_WIDTH / 2;
+    const minZ = -TABLE_DEPTH / 2;
+    const maxZ = TABLE_DEPTH / 2;
+    return mesh.position.x + half.x >= minX
+      && mesh.position.x - half.x <= maxX
+      && mesh.position.z + half.z >= minZ
+      && mesh.position.z - half.z <= maxZ;
+  }
+
+  function enforceTableCollision(mesh) {
+    if (!mesh || !isOverTable(mesh)) return;
+    const minCenterY = TABLE_SURFACE_Y + getObjectHalfSize(mesh).y;
+    if (mesh.position.y < minCenterY) mesh.position.y = minCenterY;
+  }
+
+  function clampObjectToTable(mesh) {
+    const half = getObjectHalfSize(mesh);
+    mesh.position.x = clamp(
+      mesh.position.x,
+      TABLE_CENTER_X - TABLE_WIDTH / 2 + half.x,
+      TABLE_CENTER_X + TABLE_WIDTH / 2 - half.x
+    );
+    mesh.position.z = clamp(
+      mesh.position.z,
+      -TABLE_DEPTH / 2 + half.z,
+      TABLE_DEPTH / 2 - half.z
+    );
+    mesh.position.y = TABLE_SURFACE_Y + half.y;
+  }
+
+  function resolveTaskObjectCollisions(mesh) {
+    if (!mesh) return;
+    const half = getObjectHalfSize(mesh);
+    for (let pass = 0; pass < 4; pass += 1) {
+      let moved = false;
+      taskObjects.forEach((other) => {
+        if (!other || other === mesh || (carriedObject && carriedObject.mesh === other)) return;
+        const otherHalf = getObjectHalfSize(other);
+        const dx = mesh.position.x - other.position.x;
+        const dz = mesh.position.z - other.position.z;
+        const overlapX = half.x + otherHalf.x - Math.abs(dx);
+        const overlapZ = half.z + otherHalf.z - Math.abs(dz);
+        if (overlapX <= 0 || overlapZ <= 0) return;
+        if (overlapX < overlapZ) {
+          mesh.position.x += (dx < 0 ? -1 : 1) * (overlapX + 0.003);
+        } else {
+          mesh.position.z += (dz < 0 ? -1 : 1) * (overlapZ + 0.003);
+        }
+        clampObjectToTable(mesh);
+        moved = true;
+      });
+      if (!moved) break;
+    }
+  }
+
+  function settleTaskObject(mesh) {
+    if (!mesh) return;
+    clampObjectToTable(mesh);
+    resolveTaskObjectCollisions(mesh);
+    mesh.userData.tableY = mesh.position.y;
+    mesh.userData.restPosition = mesh.position.clone();
+  }
+
+  function applyMujocoObjectStates(objects) {
+    if (!Array.isArray(objects)) return;
+    let updated = false;
+    objects.forEach((state) => {
+      const color = MUJOCO_OBJECT_COLORS[String(state && state.name || '')];
+      const mesh = color ? taskObjects.get(color) : null;
+      const position = state && state.position;
+      if (!mesh || !Array.isArray(position) || position.length < 3) return;
+      const rosX = Number(position[0]);
+      const rosY = Number(position[1]);
+      const rosZ = Number(position[2]);
+      if (![rosX, rosY, rosZ].every(Number.isFinite)) return;
+      mesh.position.set(rosX, rosZ, -rosY);
+
+      const quat = state.quat_wxyz;
+      if (Array.isArray(quat) && quat.length >= 4) {
+        const rosQuat = new THREE.Quaternion(
+          Number(quat[1]),
+          Number(quat[2]),
+          Number(quat[3]),
+          Number(quat[0])
+        );
+        if ([rosQuat.x, rosQuat.y, rosQuat.z, rosQuat.w].every(Number.isFinite)) {
+          mesh.quaternion.copy(ROS_TO_THREE_FRAME)
+            .multiply(rosQuat.normalize())
+            .multiply(THREE_TO_ROS_FRAME);
+        }
+      }
+      mesh.userData.restPosition = mesh.position.clone();
+      updated = true;
+    });
+    if (updated) mujocoObjectFeedbackAt = performance.now();
+  }
+
+  function getSceneCollisionMap() {
+    const objects = {};
+    taskObjects.forEach((mesh, color) => {
+      const position = threeToRos(mesh.position);
+      const half = getObjectHalfSize(mesh);
+      objects[color] = {
+        position,
+        size: { x: half.x * 2, y: half.z * 2, z: half.y * 2 },
+        carried: Boolean(carriedObject && carriedObject.mesh === mesh)
+      };
+    });
+    return {
+      frame: 'base_link',
+      mapping: 'three(x,y,z)=ros(x,z,-y)',
+      source: hasFreshMujocoObjectFeedback() ? 'mujoco_object_states' : 'web_fallback',
+      table: {
+        center: { x: TABLE_CENTER_X, y: 0, z: TABLE_SURFACE_Y - 0.015 },
+        size: { x: TABLE_WIDTH, y: TABLE_DEPTH, z: 0.03 },
+        surface_z: TABLE_SURFACE_Y
+      },
+      objects
+    };
   }
 
   function attachObject(color) {
@@ -1671,7 +2025,7 @@
     const mesh = carriedObject.mesh;
     mesh.userData.fakeCarried = false;
     if (!options || options.settleOnTable !== false) {
-      mesh.position.y = Number(mesh.userData.tableY) || mesh.position.y;
+      if (!hasFreshMujocoObjectFeedback()) settleTaskObject(mesh);
     }
     carriedObject = null;
     return true;
@@ -1867,6 +2221,12 @@
     },
     getCarriedObject() {
       return carriedObject ? carriedObject.color : null;
+    },
+    syncMujocoObjectStates(objects) {
+      applyMujocoObjectStates(objects);
+    },
+    getSceneCollisionMap() {
+      return getSceneCollisionMap();
     },
     generateTrajectory,
     setDragMode(enabled) {

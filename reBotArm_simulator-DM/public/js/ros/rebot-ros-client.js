@@ -11,6 +11,7 @@
       this._subscriptions = new Map();
       this._advertisedTopics = new Set();
       this._pendingServices = new Map();
+      this._pendingActions = new Map();
       this._nextId = 1;
       this._manualClose = false;
       this._lastMessageAt = new Map();
@@ -48,6 +49,7 @@
         if (seq !== this._connectSeq || socket !== this.socket) return;
         this.connected = false;
         this._rejectPendingServices('ROS 连接已断开');
+        this._rejectPendingActions('ROS 连接已断开');
         this._emitStatus('closed', 'ROS 已断开');
         if (!this._manualClose && this.autoReconnect) {
           window.setTimeout(() => this.connect(), this.reconnectDelay);
@@ -60,6 +62,7 @@
       this.autoReconnect = false;
       this.connected = false;
       this._rejectPendingServices('ROS 连接已断开');
+      this._rejectPendingActions('ROS 连接已断开');
       this._emitStatus('closed', 'ROS 已断开');
       if (this.socket) this.socket.close();
       this.socket = null;
@@ -152,11 +155,22 @@
     }
 
     sendActionGoal(actionName, actionType, goal) {
-      const uuid = this._uuid();
-      return this.callService(`${actionName}/_action/send_goal`, `${actionType}_SendGoal`, {
-        goal_id: { uuid },
-        goal
-      }).then((result) => ({ ...result, goal_id: uuid, action: actionName }));
+      const id = this._id('action');
+      return new Promise((resolve, reject) => {
+        if (!this.connected) {
+          reject(new Error('ROS 未连接'));
+          return;
+        }
+        this._pendingActions.set(id, { resolve, reject, action: actionName });
+        this._send({
+          op: 'send_action_goal',
+          id,
+          action: actionName,
+          action_type: actionType,
+          args: goal || {},
+          feedback: true
+        });
+      });
     }
 
     getRosTopics() {
@@ -261,7 +275,8 @@
         id: this._id('sub'),
         topic,
         type,
-        throttle_rate: throttleRate
+        throttle_rate: throttleRate,
+        queue_length: 1
       });
     }
 
@@ -290,6 +305,39 @@
         } else {
           pending.resolve(data.values || {});
         }
+        return;
+      }
+
+      if (data.op === 'action_feedback') {
+        const pending = this._pendingActions.get(data.id);
+        if (!pending) return;
+        this.dispatchEvent(new CustomEvent('action-feedback', {
+          detail: {
+            id: data.id,
+            action: data.action || pending.action,
+            values: data.values || {}
+          }
+        }));
+        return;
+      }
+
+      if (data.op === 'action_result') {
+        const pending = this._pendingActions.get(data.id);
+        if (!pending) return;
+        this._pendingActions.delete(data.id);
+        if (data.result === false) {
+          const message = typeof data.values === 'string'
+            ? data.values
+            : (data.values && data.values.message ? data.values.message : 'ROS action failed');
+          pending.reject(new Error(message));
+          return;
+        }
+        pending.resolve({
+          ...(data.values || {}),
+          status: data.status,
+          action: data.action || pending.action,
+          completed: true
+        });
       }
     }
 
@@ -301,6 +349,11 @@
     _rejectPendingServices(message) {
       this._pendingServices.forEach((pending) => pending.reject(new Error(message)));
       this._pendingServices.clear();
+    }
+
+    _rejectPendingActions(message) {
+      this._pendingActions.forEach((pending) => pending.reject(new Error(message)));
+      this._pendingActions.clear();
     }
 
     _id(prefix) {

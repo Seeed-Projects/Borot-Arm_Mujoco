@@ -74,11 +74,17 @@ run_web() {
     : >"${PID_FILE}"
   }
   trap 'stop_children' EXIT INT TERM
-  ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:="${ROSBRIDGE_PORT:-9090}" address:="${ROSBRIDGE_ADDRESS:-0.0.0.0}" &
-  PIDS+=("$!"); printf '%s %s\n' "$!" rosbridge >>"${PID_FILE}"
+  local rosbridge_port="${ROSBRIDGE_PORT:-9090}"
+  if ss -ltn "sport = :${rosbridge_port}" 2>/dev/null | grep -q LISTEN; then
+    printf 'ROS WebSocket: ws://localhost:%s (reuse existing listener)\n' "${rosbridge_port}"
+  else
+    ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:="${rosbridge_port}" address:="${ROSBRIDGE_ADDRESS:-0.0.0.0}" &
+    PIDS+=("$!"); printf '%s %s\n' "$!" rosbridge >>"${PID_FILE}"
+    printf 'ROS WebSocket: ws://localhost:%s (started by this command)\n' "${rosbridge_port}"
+  fi
   (cd "${WEB_DIR}" && exec node server.js) &
   PIDS+=("$!"); printf '%s %s\n' "$!" web-server >>"${PID_FILE}"
-  printf 'Web: http://localhost:3001\nROS WebSocket: ws://localhost:9090\nCtrl+C stops both.\n'
+  printf 'Web: http://localhost:3001\nCtrl+C stops processes started by this command.\n'
   wait -n "${PIDS[@]}"
 }
 

@@ -11,13 +11,14 @@ source "${SCRIPT_DIR}/source_rebotarm_env.sh"
 
 ROSBRIDGE_PORT="${ROSBRIDGE_PORT:-9090}"
 ROSBRIDGE_ADDRESS="${ROSBRIDGE_ADDRESS:-0.0.0.0}"
-REAL2SIM_MODEL="${REAL2SIM_MODEL:-stl}"
+REAL2SIM_MODEL="${REAL2SIM_MODEL:-colored}"
 export REAL2SIM_MODEL
 MUJOCO_GRASP_MODE="${MUJOCO_GRASP_MODE:-physics}"
 MUJOCO_PHYSICS_JOINT_TOPIC="${MUJOCO_PHYSICS_JOINT_TOPIC:-/rebotarm/mujoco/physics_joint_states}"
 MUJOCO_OBJECT_STATES_TOPIC="${MUJOCO_OBJECT_STATES_TOPIC:-/rebotarm/mujoco/object_states}"
 SIM_IK_TOLERANCE="${SIM_IK_TOLERANCE:-0.020}"
 SIM_IK_ORIENTATION_TOLERANCE="${SIM_IK_ORIENTATION_TOLERANCE:-0.120}"
+ROSBRIDGE_MANAGED=0
 
 PIDS=()
 NAMES=()
@@ -53,7 +54,10 @@ port_in_use() {
 
 stop_existing_rebot_stack() {
   local pattern
-  pattern="fake_bringup.launch.py|fake_rebotarm_driver|robot_state_publisher|real2sim.launch.py|real2sim_sync|mujoco_physics_grasp.launch.py|rebotarm_mujoco_physics_grasp|mujoco_physics_grasp|sim_task_server.launch.py|rebotarm_mujoco_sim_task_server|sim_rgb_camera.launch.py|rebotarm_mujoco_sim_rgb_camera|sim_color_detector.launch.py|rebotarm_mujoco_sim_color_detector|sim_color_detector.py|rosbridge_websocket_launch.xml|rosbridge_websocket"
+  # Only stop simulation-owned processes.  rosbridge may belong to
+  # `./rebotarm start web`, and robot_state_publisher may belong to the DM
+  # hardware stack, so neither is safe to match globally here.
+  pattern="fake_bringup.launch.py|fake_rebotarm_driver|real2sim.launch.py|real2sim_sync|mujoco_physics_grasp.launch.py|rebotarm_mujoco_physics_grasp|mujoco_physics_grasp|sim_task_server.launch.py|rebotarm_mujoco_sim_task_server|sim_rgb_camera.launch.py|rebotarm_mujoco_sim_rgb_camera|sim_color_detector.launch.py|rebotarm_mujoco_sim_color_detector|sim_color_detector.py"
 
   local pids=()
   mapfile -t pids < <(
@@ -90,52 +94,30 @@ stop_existing_rebot_stack() {
       kill -TERM "${pid}" >/dev/null 2>&1 || true
     fi
   done
-}
-
-stop_existing_rosbridge() {
-  local port="$1"
-  local pids=()
-
-  mapfile -t pids < <(
-    pgrep -f "rosbridge_server|rosbridge_websocket|rosbridge_websocket_launch.xml" 2>/dev/null || true
-  )
-
-  if [[ "${#pids[@]}" -eq 0 ]]; then
-    log "port ${port} is in use, but no rosbridge process was found."
-    return 1
-  fi
-
-  log "stopping existing rosbridge on port ${port}: ${pids[*]}"
-  for pid in "${pids[@]}"; do
-    if is_running "${pid}"; then
-      kill -INT "${pid}" >/dev/null 2>&1 || true
-    fi
-  done
-
-  local deadline=$((SECONDS + 8))
-  while (( SECONDS < deadline )); do
-    if ! port_in_use "${port}"; then
-      return 0
-    fi
-    sleep 1
-  done
-
-  log "rosbridge did not release port ${port}; sending SIGTERM."
-  for pid in "${pids[@]}"; do
-    if is_running "${pid}"; then
-      kill -TERM "${pid}" >/dev/null 2>&1 || true
-    fi
-  done
 
   deadline=$((SECONDS + 5))
   while (( SECONDS < deadline )); do
-    if ! port_in_use "${port}"; then
-      return 0
-    fi
+    local any_running=0
+    for pid in "${pids[@]}"; do
+      if is_running "${pid}"; then
+        any_running=1
+        break
+      fi
+    done
+    [[ "${any_running}" -eq 0 ]] && return 0
     sleep 1
   done
 
-  return 1
+  local stubborn=()
+  for pid in "${pids[@]}"; do
+    if is_running "${pid}"; then
+      stubborn+=("${pid}")
+      kill -KILL "${pid}" >/dev/null 2>&1 || true
+    fi
+  done
+  if [[ "${#stubborn[@]}" -gt 0 ]]; then
+    log "force-stopped stale simulation processes: ${stubborn[*]}"
+  fi
 }
 
 start_process() {
@@ -227,16 +209,14 @@ start_process "MuJoCo color detector" \
   ros2 launch rebotarm_mujoco sim_color_detector.launch.py
 
 if port_in_use "${ROSBRIDGE_PORT}"; then
-  if ! stop_existing_rosbridge "${ROSBRIDGE_PORT}"; then
-    log "failed to clear rosbridge port ${ROSBRIDGE_PORT}; startup cannot continue."
-    exit 1
-  fi
+  log "rosbridge port ${ROSBRIDGE_PORT} is already listening; reusing it."
+else
+  start_process "rosbridge websocket" \
+    ros2 launch rosbridge_server rosbridge_websocket_launch.xml \
+      port:="${ROSBRIDGE_PORT}" \
+      address:="${ROSBRIDGE_ADDRESS}"
+  ROSBRIDGE_MANAGED=1
 fi
-
-start_process "rosbridge websocket" \
-  ros2 launch rosbridge_server rosbridge_websocket_launch.xml \
-    port:="${ROSBRIDGE_PORT}" \
-    address:="${ROSBRIDGE_ADDRESS}"
 
 log "startup complete."
 log "web URL: ws://192.168.60.130:${ROSBRIDGE_PORT}"
@@ -244,7 +224,11 @@ log "MuJoCo grasp mode: ${MUJOCO_GRASP_MODE}"
 log "IK tolerance: ${SIM_IK_TOLERANCE} m, orientation tolerance: ${SIM_IK_ORIENTATION_TOLERANCE}"
 log "RGB camera topic: /rebotarm/mujoco/overhead_rgb/image_raw"
 log "Color detections topic: /rebotarm/vision/color_blocks/detections"
-log "Ctrl+C stops fake driver, MuJoCo, camera, vision, and rosbridge."
+if [[ "${ROSBRIDGE_MANAGED}" -eq 1 ]]; then
+  log "Ctrl+C stops fake driver, MuJoCo, camera, vision, and rosbridge."
+else
+  log "Ctrl+C stops fake driver, MuJoCo, camera, and vision; reused rosbridge stays running."
+fi
 
 while true; do
   for index in "${!PIDS[@]}"; do

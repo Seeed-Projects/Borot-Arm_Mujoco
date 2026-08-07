@@ -32,7 +32,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "model_path",
                 default_value=PathJoinSubstitution(
-                    [mujoco_share, "models", "rebotarm_b601_stl.xml"]
+                    [mujoco_share, "models", "rebotarm_b601_colored.xml"]
                 ),
             ),
             DeclareLaunchArgument(

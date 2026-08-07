@@ -100,7 +100,7 @@ class MujocoReal2Sim(Node):
         self.model_path = self._resolve_package_path(
             str(self.get_parameter("model_path").value or ""),
             "models",
-            "rebotarm_b601_stl.xml",
+            "rebotarm_b601_colored.xml",
         )
         joint_map_path = self._resolve_package_path(
             str(self.get_parameter("joint_map_file").value or ""),
